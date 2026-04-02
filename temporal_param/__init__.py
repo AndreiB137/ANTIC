@@ -1,1 +1,1 @@
-from .temporal_param import ParamStore, FilterSpec, resolve_filter, extract_state
+from .temporal_param import ParamManager, FilterSpec, resolve_filter, extract_state

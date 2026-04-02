@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from ..temporal_param import ParamStore, FilterSpec
+from ..temporal_param import ParamManager, FilterSpec
 
 class BaseCompressor(ABC):
     """Base class for any neural-network-based compressor.
@@ -44,9 +44,9 @@ class BaseCompressor(ABC):
         self.optimizer = optimizer
 
         # Checkpoint store
-        self._store: ParamStore | None = None
+        self._store: ParamManager | None = None
         if checkpoint_dir is not None:
-            self._store = ParamStore(
+            self._store = ParamManager(
                 checkpoint_dir,
                 config={"compressor_class": type(self).__qualname__},
             )

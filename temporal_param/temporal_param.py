@@ -81,7 +81,7 @@ class RestorePlan:
 # ======================================================================
 
 
-class ParamStore:
+class ParamManager:
     """Manages parameter checkpoints on disk.
 
     Supports flexible ``nnx``-style filter specs and a *keyframe / delta*
