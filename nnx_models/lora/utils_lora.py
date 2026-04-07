@@ -100,10 +100,31 @@ class LoRALinear(nnx.Linear):
 LoRA = LoRALinear
 
 
+def _linear_from_lora(
+    lora_linear: LoRALinear,
+    merge: bool,
+) -> nnx.Linear:
+    """Convert a LoRALinear back to a plain nnx.Linear."""
+    linear = nnx.Linear(
+        in_features=lora_linear.in_features,
+        out_features=lora_linear.out_features,
+        use_bias=lora_linear.use_bias,
+        dtype=getattr(lora_linear, "dtype", None),
+        param_dtype=lora_linear.kernel.value.dtype,
+        rngs=nnx.rnglib.Rngs(0),
+    )
+    linear.kernel = lora_linear.kernel
+    if merge:
+        linear.kernel.value += lora_linear.lora_a.value @ lora_linear.lora_b.value
+    if lora_linear.use_bias:
+        linear.bias = lora_linear.bias
+    return linear
+
+
 def _get_lora_linears(model: nnx.Module) -> list[LoRALinear]:
     """Collects all LoRALinear instances from the model's hidden layers."""
     result = []
-    for layer in model.hidden_layers.layers:
+    for layer in model.hidden_layers:
         if isinstance(layer, LoRALinear):
             result.append(layer)
         elif isinstance(layer, SirenLayer) and isinstance(layer.linear, LoRALinear):
@@ -118,37 +139,70 @@ def _get_lora_linears(model: nnx.Module) -> list[LoRALinear]:
 
 def add_lora_to_model(
     model: nnx.Module,
-    lora_rank: int,
+    rank: int,
     rngs: nnx.rnglib.Rngs = nnx.rnglib.Rngs(0)
 ):
     """Adds LoRA layers to a given model, preserving the original pytree structure."""
 
-    for i, layer in enumerate(model.hidden_layers.layers):
+    for i, layer in enumerate(model.hidden_layers):
         if isinstance(layer, LoRALinear):
             continue
         elif isinstance(layer, SirenLayer):
             if not isinstance(layer.linear, LoRALinear):
                 layer.linear = LoRALinear.from_linear(
-                    layer.linear, lora_rank, rngs=rngs
+                    layer.linear, rank, rngs=rngs
                 )
         elif isinstance(layer, RealGaborLayer):
             if not isinstance(layer.freqs, LoRALinear):
                 layer.freqs = LoRALinear.from_linear(
-                    layer.freqs, lora_rank, rngs=rngs
+                    layer.freqs, rank, rngs=rngs
                 )
             if not isinstance(layer.scales, LoRALinear):
                 layer.scales = LoRALinear.from_linear(
-                    layer.scales, lora_rank, rngs=rngs
+                    layer.scales, rank, rngs=rngs
                 )
         elif isinstance(layer, nnx.Linear):
-            model.hidden_layers.layers[i] = LoRALinear.from_linear(
-                layer, lora_rank, rngs=rngs
+            model.hidden_layers[i] = LoRALinear.from_linear(
+                layer, rank, rngs=rngs
             )
         else:
             raise ValueError(
                 f"Unsupported layer type: {type(layer)}. "
                 "LoRA can only be applied to Linear, SirenLayer, and RealGaborLayer."
             )
+
+
+def remove_lora_from_model(
+    model: nnx.Module,
+    merge: bool = True,
+):
+    """Remove LoRA layers from a model, optionally merging them into the base weights."""
+
+    lora_removed = False
+
+    for i, layer in enumerate(model.hidden_layers):
+        if isinstance(layer, LoRALinear):
+            model.hidden_layers[i] = _linear_from_lora(layer, merge=merge)
+            lora_removed = True
+        elif isinstance(layer, SirenLayer):
+            if isinstance(layer.linear, LoRALinear):
+                layer.linear = _linear_from_lora(layer.linear, merge=merge)
+                lora_removed = True
+        elif isinstance(layer, RealGaborLayer):
+            if isinstance(layer.freqs, LoRALinear):
+                layer.freqs = _linear_from_lora(layer.freqs, merge=merge)
+                lora_removed = True
+            if isinstance(layer.scales, LoRALinear):
+                layer.scales = _linear_from_lora(layer.scales, merge=merge)
+                lora_removed = True
+        elif not isinstance(layer, nnx.Linear):
+            raise ValueError(
+                f"Unsupported layer type: {type(layer)}. "
+                "LoRA can only be removed from Linear, SirenLayer, and RealGaborLayer."
+            )
+
+    if not lora_removed:
+        raise ValueError("No LoRA parameters found in the model.")
 
 
 def reset_lora_leaf(path, val, key):
@@ -159,10 +213,10 @@ def reset_lora_leaf(path, val, key):
         return jax.nn.initializers.zeros(key, val.shape, val.dtype)
 
 
-@nnx.jit(static_argnames=('lora_rank',))
+@nnx.jit(static_argnames=('rank',))
 def reset_lora_params(
     model: nnx.Module,
-    lora_rank: int,
+    rank: int,
     key: jax.random.PRNGKey = jax.random.PRNGKey(0),
 ):
     """Resets the LoRA parameters of the model."""
@@ -172,10 +226,10 @@ def reset_lora_params(
     keys = jax.random.split(key, len(lora_linears))
     for i, lora_linear in enumerate(lora_linears):
         lora_linear.lora_a.value = lora_linear.a_initializer(
-            keys[i], (lora_linear.in_features, lora_rank), lora_linear.lora_a.value.dtype
+            keys[i], (lora_linear.in_features, rank), lora_linear.lora_a.value.dtype
         )
         lora_linear.lora_b.value = lora_linear.b_initializer(
-            keys[i], (lora_rank, lora_linear.out_features), lora_linear.lora_b.value.dtype
+            keys[i], (rank, lora_linear.out_features), lora_linear.lora_b.value.dtype
         )
 
 
@@ -188,3 +242,40 @@ def merge_lora_params(model: nnx.Module):
 
     for lora_linear in lora_linears:
         lora_linear.kernel.value += lora_linear.lora_a.value @ lora_linear.lora_b.value
+
+
+def apply_lora_state(model: nnx.Module, lora_state: nnx.State):
+    """Fold external LoRA deltas into a plain model's kernel weights.
+
+    Given a model **without** LoRA layers and a separately stored
+    ``nnx.State`` that mirrors the model's ``hidden_layers`` structure
+    but contains only ``lora_a`` / ``lora_b`` arrays, this function
+    computes ``kernel += lora_a @ lora_b`` for every hidden layer.
+
+    Parameters
+    ----------
+    model : nnx.Module
+        A model whose hidden layers are plain ``nnx.Linear``,
+        ``SirenLayer``, or ``RealGaborLayer`` (no LoRA wrappers).
+    lora_state : nnx.State
+        State containing only ``lora_a`` and ``lora_b`` entries,
+        structured to mirror ``model.hidden_layers``.  Typically
+        obtained via ``nnx.state(lora_model, nnx.LoRAParam)``.
+    """
+    for i, layer in enumerate(model.hidden_layers):
+        if isinstance(layer, SirenLayer):
+            ls = lora_state.hidden_layers[i]
+            layer.linear.kernel.value += ls.lora_a.value @ ls.lora_b.value
+        elif isinstance(layer, RealGaborLayer):
+            fs = lora_state.hidden_layers[i].freqs
+            layer.freqs.kernel.value += fs.lora_a.value @ fs.lora_b.value
+            ss = lora_state.hidden_layers[i].scales
+            layer.scales.kernel.value += ss.lora_a.value @ ss.lora_b.value
+        elif isinstance(layer, nnx.Linear):
+            ls = lora_state.hidden_layers[i]
+            layer.kernel.value += ls.lora_a.value @ ls.lora_b.value
+        else:
+            raise ValueError(
+                f"Unsupported layer type: {type(layer)}. "
+                "LoRA can only be applied to Linear, SirenLayer, and RealGaborLayer."
+            )

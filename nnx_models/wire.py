@@ -67,7 +67,7 @@ class WIRE(nnx.Module):
             dtype=dtype,
             rngs=rngs
         )
-        self.hidden_layers = [
+        self.hidden_layers = nnx.List([
             WIRElayer(
                 input_dim=hidden_dim,
                 output_dim=hidden_dim,
@@ -77,12 +77,11 @@ class WIRE(nnx.Module):
                 dtype=dtype,
                 rngs=rngs
             ) for _ in range(num_hidden_layers)
-        ]
-        self.hidden_layers = nnx.Sequential(*self.hidden_layers)
-
+        ])
     def __call__(self, x):
         x = self.in_layer(x)
-        x = self.hidden_layers(x)
+        for layer in self.hidden_layers:
+            x = layer(x)
         x = self.out_layer(x)
         return x
 
@@ -158,7 +157,7 @@ class RealGaborLayer(nnx.Module):
 
 if __name__ == "__main__":
     # Example usage
-    model = WIRE(input_dim=3, output_dim=4, hidden_dim=5, num_hidden_layers=2, first_omega=1.0, hidden_omega=1.0, scale=1.0, complexgabor=True)
+    model = WIRE(input_dim=3, output_dim=4, hidden_dim=5, num_hidden_layers=2, first_omega=1.0, hidden_omega=1.0, scale=1.0, complexgabor=False)
     x = jnp.ones((10, 3))
 
     output = model(x)

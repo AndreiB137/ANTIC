@@ -36,7 +36,8 @@ class SIREN(nnx.Module):
             param_dtype=dtype,
             rngs=rngs
         )
-        self.hidden_layers = [
+
+        self.hidden_layers = nnx.List([
             SirenLayer(
                 input_dim=hidden_dim,
                 output_dim=hidden_dim,
@@ -45,12 +46,12 @@ class SIREN(nnx.Module):
                 dtype=dtype,
                 rngs=rngs
             ) for _ in range(num_hidden_layers)
-        ]
-        self.hidden_layers = nnx.Sequential(*self.hidden_layers)
+        ])
 
     def __call__(self, x):
         x = self.in_layer(x)
-        x = self.hidden_layers(x)
+        for layer in self.hidden_layers:
+            x = layer(x)
         x = self.out_layer(x)
         return x
 
