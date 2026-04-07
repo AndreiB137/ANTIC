@@ -52,7 +52,10 @@ class SZ3Compressor:
         l2norm_error_bound: float = 1e-3,
         algorithm: str | None = None,
     ):
-        import pysz
+        try:
+            import pysz
+        except ImportError:
+            raise ImportError("pysz library is required for SZ3Compressor. Install with 'pip install pysz'.")
 
         if SZ3Compressor._MODE_MAP is None:
             SZ3Compressor._MODE_MAP = {
@@ -79,6 +82,7 @@ class SZ3Compressor:
         self.algorithm = algorithm
 
     def _make_config(self, shape: tuple):
+        """Build an SZ3 configuration object for the given array shape."""
         config = self.pysz.szConfig()
         mode_key = self.error_bound_mode.lower()
         config.errorBoundMode = self._MODE_MAP[mode_key]
@@ -92,6 +96,7 @@ class SZ3Compressor:
         return config
 
     def compress(self, data: np.ndarray) -> CompressionResult:
+        """Compress a numpy array using SZ3 and return a CompressionResult."""
         data = np.ascontiguousarray(data)
         config = self._make_config(data.shape)
         sz = self.pysz.sz(config)
@@ -111,6 +116,7 @@ class SZ3Compressor:
         )
 
     def decompress(self, result: CompressionResult) -> np.ndarray:
+        """Decompress a CompressionResult back to a numpy array."""
         config = self._make_config(result.original_shape)
         sz = self.pysz.sz(config)
         decompressed, _ = sz.decompress(
@@ -121,6 +127,7 @@ class SZ3Compressor:
     def compress_and_decompress(
         self, data: np.ndarray
     ) -> Tuple[np.ndarray, CompressionResult]:
+        """Compress and immediately decompress, returning both the reconstructed array and compression metadata."""
         result = self.compress(data)
         decompressed = self.decompress(result)
         return decompressed, result
@@ -153,7 +160,10 @@ class ZFPCompressor:
         rate: float = 16.0,
         precision: int = 32,
     ):
-        import zfpy
+        try:
+            import zfpy
+        except ImportError:
+            raise ImportError("zfpy library is required for ZFPCompressor. Install with 'pip install zfpy'.")
 
         self.zfpy = zfpy
         self.mode = mode
@@ -162,6 +172,7 @@ class ZFPCompressor:
         self.precision = precision
 
     def _compress_kwargs(self) -> dict:
+        """Return the keyword arguments for ``zfpy.compress_numpy`` based on the active mode."""
         if self.mode == "tolerance":
             return {"tolerance": self.tolerance}
         elif self.mode == "rate":
@@ -174,6 +185,7 @@ class ZFPCompressor:
             raise ValueError(f"Unsupported ZFP mode: {self.mode}")
 
     def compress(self, data: np.ndarray) -> CompressionResult:
+        """Compress a numpy array using ZFP and return a CompressionResult."""
         data = np.ascontiguousarray(data)
         kwargs = self._compress_kwargs()
 
@@ -194,11 +206,13 @@ class ZFPCompressor:
         )
 
     def decompress(self, result: CompressionResult) -> np.ndarray:
+        """Decompress a CompressionResult back to a numpy array."""
         return self.zfpy.decompress_numpy(result.compressed_bytes)
 
     def compress_and_decompress(
         self, data: np.ndarray
     ) -> Tuple[np.ndarray, CompressionResult]:
+        """Compress and immediately decompress, returning both the reconstructed array and compression metadata."""
         result = self.compress(data)
         decompressed = self.decompress(result)
         return decompressed, result
@@ -228,7 +242,11 @@ class MGARDCompressor:
     def __init__(
         self, tolerance: float = 1e-3, s: float = 0.0, mode: str = "abs"
     ):
-        import mgard_binding
+        try:
+            import mgard_binding
+        except ImportError:
+            raise ImportError("mgard_binding module is required for MGARDCompressor." \
+            "As of now, you need to build the MGARD-X C++ library from source and create Python bindings using pybind11.")
 
         self.mgard = mgard_binding
         self.tolerance = tolerance
@@ -236,6 +254,7 @@ class MGARDCompressor:
         self.mode = mode
 
     def compress(self, data: np.ndarray) -> CompressionResult:
+        """Compress a numpy array using MGARD-X and return a CompressionResult."""
         data = np.ascontiguousarray(data)
         if data.dtype not in (np.float32, np.float64):
             raise ValueError("MGARD only supports float32 and float64 arrays")
@@ -258,6 +277,7 @@ class MGARDCompressor:
         )
 
     def decompress(self, result: CompressionResult) -> np.ndarray:
+        """Decompress a CompressionResult back to a numpy array."""
         dtype_str = self._DTYPE_MAP.get(str(result.original_dtype))
         if dtype_str is None:
             raise ValueError(f"Unsupported dtype: {result.original_dtype}")
@@ -269,6 +289,7 @@ class MGARDCompressor:
     def compress_and_decompress(
         self, data: np.ndarray
     ) -> Tuple[np.ndarray, CompressionResult]:
+        """Compress and immediately decompress, returning both the reconstructed array and compression metadata."""
         result = self.compress(data)
         decompressed = self.decompress(result)
         return decompressed, result
@@ -313,7 +334,10 @@ class Blosc2Compressor:
         trunc_prec_bits: int | None = None,
         nthreads: int = 1,
     ):
-        import blosc2
+        try:
+            import blosc2
+        except ImportError:
+            raise ImportError("blosc2 library is required for Blosc2Compressor. Install with 'pip install blosc2'.")
 
         if Blosc2Compressor._CODEC_MAP is None:
             Blosc2Compressor._CODEC_MAP = {
@@ -339,6 +363,7 @@ class Blosc2Compressor:
         self.nthreads = nthreads
 
     def _make_cparams(self, typesize: int):
+        """Build Blosc2 compression parameters for the given element byte size."""
         filters = []
         filters_meta = []
 
@@ -359,6 +384,7 @@ class Blosc2Compressor:
         )
 
     def compress(self, data: np.ndarray) -> CompressionResult:
+        """Compress a numpy array using Blosc2 and return a CompressionResult."""
         data = np.ascontiguousarray(data)
         cparams = self._make_cparams(data.dtype.itemsize)
         dparams = self.blosc2.DParams(nthreads=self.nthreads)
@@ -380,11 +406,13 @@ class Blosc2Compressor:
         )
 
     def decompress(self, result: CompressionResult) -> np.ndarray:
+        """Decompress a CompressionResult back to a numpy array."""
         return self.blosc2.unpack_array2(result.compressed_bytes)
 
     def compress_and_decompress(
         self, data: np.ndarray
     ) -> Tuple[np.ndarray, CompressionResult]:
+        """Compress and immediately decompress, returning both the reconstructed array and compression metadata."""
         result = self.compress(data)
         decompressed = self.decompress(result)
         return decompressed, result
@@ -394,6 +422,7 @@ class Blosc2Compressor:
 # Utility: run all compressors on a single array and return metrics
 # ---------------------------------------------------------------------------
 def compute_metrics(original: np.ndarray, decompressed: np.ndarray) -> dict:
+    """Compute reconstruction quality metrics (MSE, MAE, max absolute error, relative L2 error) between original and decompressed arrays."""
     diff = original.astype(np.float64) - decompressed.astype(np.float64)
     mse = np.mean(diff ** 2)
     mae = np.mean(np.abs(diff))
