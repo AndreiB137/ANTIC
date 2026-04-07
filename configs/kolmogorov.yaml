@@ -1,0 +1,50 @@
+# ============================================================
+# Kolmogorov (2-D Navier–Stokes) experiment — ANTIC
+# ============================================================
+
+seed: 42
+
+solver: kolmogorov
+
+model:
+  name: mlp
+  input_dim: 2
+  output_dim: 1
+  hidden_dim: 64
+  num_hidden_layers: 5
+  fourier_emb_dim: 128
+  fourier_emb_scale: 7.0
+
+optimizer:
+  name: soap
+  learning_rate: 1.0e-2
+  weight_decay: 1.0e-4
+  scheduler:
+    type: cosine_decay
+    end_lr: 1.0e-5
+
+training:
+  initial_epochs: 20
+  subsequent_epochs: 10
+  batch_size: 10000
+  filter: all
+  verbose: true
+  stop_at: 2.0
+  save_dir: kolmogorov_test1/
+
+normalization:
+  enabled: true
+  method: min-max
+
+selector:
+  type: kolmogorov
+  metric: max_abs
+  corr_threshold: 0.90
+  window_size: 5
+
+wandb:
+  enabled: true
+  project: LoRANTiC
+  name: kolmogorov_test
+  tags: [kolmogorov, navier-stokes, mlp]
+  log_every: 1

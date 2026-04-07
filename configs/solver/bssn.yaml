@@ -1,0 +1,17 @@
+grid:
+  n: 213
+  domain_width: 30.0
+
+evolution:
+  total_time: 250.0
+  dt: 0.0419015
+  show_constraints: true
+
+damping_args:
+  ko_damping: 0.05
+  ko_strength: 0.5
+  lapse_damping: 0.8
+  gauge_shift_damping: 2.0
+  metric_damping: -0.18
+  momentum_damping: 0.04
+  gamma_damping: 0.9

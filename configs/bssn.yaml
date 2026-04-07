@@ -1,0 +1,52 @@
+# ============================================================
+# BSSN (numerical relativity) experiment — ANTIC
+# ============================================================
+
+seed: 0
+
+solver:
+  name: bssn
+  initial_data_path: "..."
+
+model:
+  name: wire
+  input_dim: 3
+  output_dim: 1
+  hidden_dim: 256
+  num_hidden_layers: 5
+  first_omega: 1.0
+  hidden_omega: 1.0
+  scale: 1.0
+  complexgabor: false
+
+optimizer:
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  scheduler:
+    type: warmup_cosine_decay
+    warmup_percentage: 0.1
+
+training:
+  initial_epochs: 2000
+  subsequent_epochs: 800
+  batch_size: 8192
+  filter: lora
+  rank: 16
+  reset_every_n: 100
+  verbose: false
+  stop_at: 'inf'
+  save_dir: bssn/
+
+selector:
+  type: bssn
+  surge_factor: 1.55
+  history_len: 60
+  patience_factor: 5
+  window_size: 5
+
+wandb:
+  enabled: false
+  project: antic
+  name: bssn-binary
+  tags: [bssn, numerical-relativity, wire]
+  log_every: 5

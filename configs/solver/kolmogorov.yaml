@@ -1,0 +1,10 @@
+# ============================================================
+# Kolmogorov (2-D Navier–Stokes) solver parameters
+# ============================================================
+
+ns: 256
+viscosity: 1.0e-3
+max_velocity: 5.0
+anti_aliasing: true
+outer_steps: 1000
+total_time: 25.0

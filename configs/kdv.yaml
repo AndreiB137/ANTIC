@@ -1,0 +1,52 @@
+# ============================================================
+# KdV soliton experiment — ANTIC
+# ============================================================
+
+seed: 42
+
+solver: kdv
+
+model:
+  name: mlp
+  input_dim: 1
+  output_dim: 1
+  hidden_dim: 16
+  num_hidden_layers: 2
+  fourier_emb_dim: 16
+  fourier_emb_scale: 1.0
+
+optimizer:
+  name: adamw
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  scheduler:
+    type: constant
+
+training:
+  initial_epochs: 200
+  subsequent_epochs: 100
+  batch_size: null
+  filter: hidden_layers
+  rank: 4
+  reset_every_n: 100
+  verbose: false
+  stop_at: 1.0
+  save_dir: kdv_test1/
+  num_devices: 1
+
+normalization:
+  enabled: true
+  method: min-max
+
+selector:
+  type: kdv
+  high_quantile: 0.95
+  low_quantile: 0.05
+  window_size: 10
+
+wandb:
+  enabled: false
+  project: antic
+  name: kdv-soliton
+  tags: [kdv, soliton, all]
+  log_every: 1
