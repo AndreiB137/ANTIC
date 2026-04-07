@@ -13,7 +13,7 @@ import jax.numpy as jnp
 State = Any
 
 
-class Solver:
+class Solver(ABC):
     """Wraps an arbitrary PDE time-stepping function.
 
     The user only needs to supply a *step function* with the signature::
@@ -63,40 +63,37 @@ class Solver:
         )
     """
 
-    def __init__(
-        self,
-        step_fn: Callable[[State], State],
-        extract_fn: Optional[Callable[[State], jnp.ndarray]] = None,
-        dt: Optional[float] = None,
-        metadata: Optional[dict] = None,
-    ):
-        self._step_fn = step_fn
-        self._extract_fn = extract_fn if extract_fn is not None else _identity
-        self.dt = dt
-        self.metadata = metadata or {}
+    @abstractmethod
+    def step(self, *args, **kwargs) -> State:
+        """Advance the PDE by one time step and return the new state."""
+        pass
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    @abstractmethod
+    def extract(self, *args, **kwargs) -> jnp.ndarray:
+        """Extract the physical-space field snapshot from the current state."""
+        pass
 
-    def step(self, state: State) -> State:
-        """Advance the PDE by one time step."""
-        return self._step_fn(state)
+    @abstractmethod
+    def rollout(self, *args, **kwargs) -> State:
+        """Advance the state by multiple time steps and return the final state."""
+        pass
 
-    def extract(self, state: State) -> jnp.ndarray:
-        """Extract the physical-space field from *state*."""
-        return self._extract_fn(state)
+    @abstractmethod
+    def prepare_coords(self, *args, **kwargs) -> jnp.ndarray:
+        """Prepare the coordinates for the compressor."""
+        pass
 
-    def rollout(self, state: State, n_steps: int) -> State:
-        """Apply ``step`` *n_steps* times and return the final state."""
-        for _ in range(n_steps):
-            state = self.step(state)
-        return state
+    @abstractmethod
+    def save_state(self, *args, **kwargs):
+        """Save the current state to disk."""
+        pass
 
-    def __repr__(self) -> str:
-        name = self.metadata.get("name", "custom")
-        return f"Solver(name={name!r}, dt={self.dt})"
-
+    @abstractmethod
+    def load_state(self, *args, **kwargs) -> State:
+        """Load a state from disk."""
+        pass
+    
 
 def _identity(x):
+    """Identity function used as a default extract_fn."""
     return x
