@@ -1,0 +1,44 @@
+# ============================================================
+# ANTIC — Adaptive Neural Temporal In-situ Compressor
+# Core dependencies
+# ============================================================
+
+# JAX ecosystem
+jax>=0.7.0
+jaxlib>=0.7.0
+flax>=0.10.5
+optax>=0.2.3
+orbax-checkpoint>=0.11.0
+
+# SOAP optimizer
+git+https://github.com/haydn-jones/SOAP_JAX
+
+# JAX-CFD (for Kolmogorov / Navier-Stokes solver)
+jax-cfd>=0.2.0
+
+# Configuration & validation
+pydantic>=2.6.0
+pyyaml>=6.0
+
+# Numerics & data
+numpy>=2.0.0
+scipy>=1.13.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.13.0
+
+# Experiment tracking
+wandb>=0.16.0
+
+# Utilities
+tqdm>=4.65.0
+
+# Classical compressors (optional)
+# zfpy          # ZFP lossy compression
+# blosc2        # Blosc2 compression
+# pysz          # SZ3 compression
+# mgard         # MGARD compression
+
+# BSSN numerical relativity (optional — requires JAX_NR)
+# See README.md for JAX_NR installation instructions
