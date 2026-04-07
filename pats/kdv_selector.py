@@ -1,9 +1,15 @@
 
 from __future__ import annotations
+from collections import deque
+from pathlib import Path
+import json
 
 from .pats import PATS
 from typing import Any
 import jax.numpy as jnp
+
+from solver.kdv import KDVSolver
+import pickle
 
 class KdVActivitySelector(PATS):
     """Physics-aware selector for KdV using the time-derivative
@@ -26,46 +32,53 @@ class KdVActivitySelector(PATS):
 
     def __init__(
         self,
-        domain_length: float = 10.0 * jnp.pi,
-        nonlinearity: float = 1.0,
-        threshold_quantile: float = 0.75,
-        window_size: int = 20,
-        warmup: int = 5,
-        **kwargs: Any,
+        high_quantile: float = 0.95,
+        low_quantile: float = 0.05,
+        window_size: int = 10,
     ):
-        super().__init__(warmup=warmup, **kwargs)
-        self.domain_length = domain_length
-        self.nonlinearity = nonlinearity
-        self.threshold_quantile = threshold_quantile
+        super().__init__()
+        self.high_quantile = high_quantile
+        self.low_quantile = low_quantile
         self.window_size = window_size
+        self.history = deque(maxlen=window_size)
 
-    def compute_activity(self, field: jnp.ndarray) -> float:
-        """Mean absolute KdV time-derivative over the spatial domain."""
-        act = kdv_activity(field, self.domain_length, self.nonlinearity)
-        return jnp.mean(act)
+    def init(self, initial_field: jnp.ndarray, solver: KDVSolver) -> None:
+        """Seed the selector with the initial field and bootstrap the activity history."""
+        self.history.clear()
+        self.history.append(self.compute_activity(initial_field, solver))
 
-    def decide(self, timestep: int) -> bool:
-        """Keep if current activity exceeds the rolling quantile."""
-        h = self._activity_history
-        recent = h[-self.window_size:]
-        q = jnp.quantile(jnp.array(recent), self.threshold_quantile)
-        return h[-1] > q
-    
+    def compute_activity(self, field: jnp.ndarray, solver: KDVSolver) -> float:
+        """Compute the maximum absolute PDE right-hand-side as the KdV activity signal."""
+        u_t = solver.pde_rhs(field)
+        u_t = solver.to_real(u_t)
+        return jnp.max(jnp.abs(u_t))
 
-def _spectral_derivative_1d(
-    field: jnp.ndarray, order: int, domain_length: float,
-) -> jnp.ndarray:
-    n = field.shape[-1]
-    k = 2.0 * jnp.pi * jnp.fft.fftfreq(n, d=domain_length / n)
-    return jnp.fft.ifft((1j * k) ** order * jnp.fft.fft(field, axis=-1), axis=-1).real
+    def _decide(self, field: jnp.ndarray, solver: KDVSolver) -> bool:
+        """Keep the snapshot if its activity falls outside the rolling quantile window."""
+        activity = self.compute_activity(field, solver)
+        recent = list(self.history)
+        q_high = jnp.quantile(jnp.array(recent), self.high_quantile)
+        q_low = jnp.quantile(jnp.array(recent), self.low_quantile)
+        self.history.append(activity)
+        return activity > q_high or activity < q_low
 
+    def _save_state(self, base_dict: dict[str, Any], path: str | Path) -> None:
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        state = {
+            "history": list(self.history),
+        }
+        state.update(base_dict)
+        with open(path / "state.pkl", "wb") as f:
+            pickle.dump(state, f)
 
-def kdv_activity(
-    field: jnp.ndarray,
-    domain_length: float = 10.0 * jnp.pi,
-    nonlinearity: float = 1.0,
-) -> jnp.ndarray:
-    """Pointwise absolute KdV time-derivative ``|u_t|``."""
-    u_x = _spectral_derivative_1d(field, 1, domain_length)
-    u_xxx = _spectral_derivative_1d(field, 3, domain_length)
-    return jnp.abs(-u_xxx - nonlinearity * field * u_x)
+    def _load_state(self, path: str | Path) -> None:
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Selector state directory {path} not found.")
+        with open(path / "state.pkl", "rb") as f:
+            state = pickle.load(f)
+        self.physical_time = state["physical_time"]
+        self.selected_snapshots = state["selected_snapshots"]
+        self.history = deque(state["history"], maxlen=self.window_size)
+        
