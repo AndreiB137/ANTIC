@@ -15,3 +15,5 @@ damping_args:
   metric_damping: -0.18
   momentum_damping: 0.04
   gamma_damping: 0.9
+
+initial_data_path: '...'

@@ -10,7 +10,7 @@ class CommonModelConfig(BaseModel):
     dtype: str = "float32"
 
 class MLPConfig(CommonModelConfig):
-    name: Literal["mlp", "mlp_plus"]
+    name: Literal["mlp", "mlp+"]
     fourier_emb_dim: int = 128
     fourier_emb_scale: float = 7.0
 

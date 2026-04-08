@@ -2,39 +2,35 @@
 # BSSN (numerical relativity) experiment — ANTIC
 # ============================================================
 
-seed: 0
+seed: 42
 
 solver:
   name: bssn
-  initial_data_path: "..."
 
 model:
-  name: wire
+  name: mlp+
   input_dim: 3
-  output_dim: 1
+  output_dim: 18
   hidden_dim: 256
   num_hidden_layers: 5
-  first_omega: 1.0
-  hidden_omega: 1.0
-  scale: 1.0
-  complexgabor: false
+  fourier_emb_dim: 256
+  fourier_emb_scale: 1.0
 
 optimizer:
-  learning_rate: 1.0e-4
-  weight_decay: 1.0e-5
+  name: adamw
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
   scheduler:
-    type: warmup_cosine_decay
-    warmup_percentage: 0.1
+    type: cosine_decay
+    end_lr: 1.0e-5
 
 training:
-  initial_epochs: 2000
-  subsequent_epochs: 800
-  batch_size: 8192
-  filter: lora
-  rank: 16
-  reset_every_n: 100
+  initial_epochs: 200
+  subsequent_epochs: 50
+  batch_size: 100000
+  filter: all
   verbose: false
-  stop_at: 'inf'
+  stop_at: 10.0
   save_dir: bssn/
 
 selector:
@@ -46,7 +42,7 @@ selector:
 
 wandb:
   enabled: false
-  project: antic
-  name: bssn-binary
-  tags: [bssn, numerical-relativity, wire]
+  project: ANTIC
+  name: bssn-test
+  tags: [bssn, numerical-relativity, mlp+, all]
   log_every: 5

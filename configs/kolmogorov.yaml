@@ -7,7 +7,7 @@ seed: 42
 solver: kolmogorov
 
 model:
-  name: mlp
+  name: mlp+
   input_dim: 2
   output_dim: 1
   hidden_dim: 64
@@ -16,8 +16,8 @@ model:
   fourier_emb_scale: 7.0
 
 optimizer:
-  name: soap
-  learning_rate: 1.0e-2
+  name: adamw
+  learning_rate: 1.0e-3
   weight_decay: 1.0e-4
   scheduler:
     type: cosine_decay
@@ -27,9 +27,11 @@ training:
   initial_epochs: 20
   subsequent_epochs: 10
   batch_size: 10000
-  filter: all
-  verbose: true
-  stop_at: 2.0
+  filter: lora
+  rank: 16
+  reset_every_n: 50
+  verbose: false
+  stop_at: 0.3
   save_dir: kolmogorov_test1/
 
 normalization:
@@ -43,8 +45,8 @@ selector:
   window_size: 5
 
 wandb:
-  enabled: true
-  project: LoRANTiC
+  enabled: false
+  project: ANTIC
   name: kolmogorov_test
-  tags: [kolmogorov, navier-stokes, mlp]
+  tags: [kolmogorov, navier-stokes, mlp+, lora]
   log_every: 1

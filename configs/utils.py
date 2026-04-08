@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from temporal_selector.no_selector import NoneSelector
+from pats.no_selector import NoneSelector
 
 from .schema import NormalizationMethod, OptimizerConfig, OptimizerType, SchedulerConfig, SchedulerType, NormalizationConfig
 from .helper_cfg import ModelConfig, SelectorConfig, SolverConfig
@@ -52,6 +52,20 @@ def build_optimizer(opt_cfg: OptimizerConfig, schedule_cfg: SchedulerConfig, dec
         )
     elif opt_cfg.name == "adamw":
         return optax.adamw(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "adamaxw":
+        return optax.adamaxw(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "nadamw":
+        return optax.nadamw(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "lamb":
+        return optax.lamb(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "lion":
+        return optax.lion(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "novograd":
+        return optax.novograd(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "lars":
+        return optax.lars(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
+    elif opt_cfg.name == "adan":
+        return optax.adan(learning_rate=schedule, weight_decay=opt_cfg.weight_decay)
     else:
         raise NotImplementedError(f"Unknown optimizer type: {opt_cfg.name}. Not implemented yet. Supported types are: {list(OptimizerType)}")
 

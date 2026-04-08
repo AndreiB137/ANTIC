@@ -30,6 +30,13 @@ class SelectorType(str, Enum):
     
 class OptimizerType(str, Enum):
     adamw = "adamw"
+    adamaxw = "adamaxw"
+    nadamw = "nadamw"
+    lamb = "lamb"
+    lion = "lion"
+    novograd = "novograd"
+    lars = "lars"
+    adan = "adan"
     soap = "soap"
 
 class NormalizationMethod(str, Enum):
@@ -71,6 +78,7 @@ class TrainingConfig(BaseModel):
     initial_epochs: int = 500
     subsequent_epochs: int = 300
     batch_size: Optional[int] = None
+    use_jac: bool = False
     filter: FilterType = FilterType.all
     rank: int = 4
     reset_every_n: int = 100
@@ -142,6 +150,17 @@ class ExperimentConfig(BaseModel):
     selector: SelectorConfig = Field(default_factory=SelectorConfig)
     wandb: WandbConfig = Field(default_factory=WandbConfig)
 
+    @model_validator(mode="after")
+    def check_use_jac(self):
+        if self.training.use_jac and self.solver.name != "bssn":
+            raise ValueError("use_jac=True is only supported for the BSSN solver.")
+        return self
+    
+    @model_validator(mode="after")
+    def check_normalization_solver(self):
+        if self.normalization.enabled and self.solver.name == "bssn":
+            raise ValueError("Normalization is not supported for the BSSN solver.")
+        return self
 
 # ======================================================================
 # Loader

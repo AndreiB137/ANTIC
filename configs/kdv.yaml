@@ -7,7 +7,7 @@ seed: 42
 solver: kdv
 
 model:
-  name: mlp
+  name: mlp+
   input_dim: 1
   output_dim: 1
   hidden_dim: 16
@@ -17,7 +17,7 @@ model:
 
 optimizer:
   name: adamw
-  learning_rate: 1.0e-3
+  learning_rate: 1.0e-2
   weight_decay: 1.0e-4
   scheduler:
     type: constant
@@ -26,12 +26,10 @@ training:
   initial_epochs: 200
   subsequent_epochs: 100
   batch_size: null
-  filter: hidden_layers
-  rank: 4
-  reset_every_n: 100
+  filter: all
   verbose: false
-  stop_at: 1.0
-  save_dir: kdv_test1/
+  stop_at: 0.5
+  save_dir: kdv_test2/
   num_devices: 1
 
 normalization:
@@ -39,14 +37,11 @@ normalization:
   method: min-max
 
 selector:
-  type: kdv
-  high_quantile: 0.95
-  low_quantile: 0.05
-  window_size: 10
+  type: none
 
 wandb:
   enabled: false
-  project: antic
+  project: ANTIC
   name: kdv-soliton
-  tags: [kdv, soliton, all]
+  tags: [kdv, soliton, mlp+, all]
   log_every: 1
