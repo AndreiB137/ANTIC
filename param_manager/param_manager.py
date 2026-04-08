@@ -22,15 +22,27 @@ import pickle
 
 class ParamManager:
     """
-    Manages saving and loading of neural field model parameters 
-    with support for filtered checkpoints.
 
-    
+    Manages saving and loading of neural field model parameters 
+    with support for checkpoints where only a subset of parameters
+    (e.g. LoRA matrices, only hidden layers or other specific components) are saved.
+
+    The clas is best used during the full ANTIC compression loop, it does not 
+    implement a general saving and loading interface for an independent run,
+    but rather is designed to work in the full compression workflow.
+
+    If a checkpoint involves only a subset of paramaters, the manager automatically loads the
+    most recent checkpoint involving the full parameter set and updates it with the current subset checkpoint.
+    This is done by keeping track of last_full_save variable, which is updated whenever a full checkpoint is saved.
+
+    No matter if a full or partial checkpoint is loaded, the returned model parameter state will always have the same pytree structure
+    as the original model. Moreover, since saved parameters correspond to the actual compression at a particular snapshot, these
+    are restored in O(1) time, without needing to additional reads to reconstruct the compressed state.
 
     Parameters
     ----------
     root_dir : str or Path
-        Directory where checkpoints are persisted.
+        Directory where compressed parameters are stored.
     """
 
     def __init__(self, root_dir: str | Path):
@@ -79,48 +91,40 @@ class ParamManager:
             nnx.state(model_abstract_state)
         )
 
-    # ------------------------------------------------------------------
-    # Saving
-    # ------------------------------------------------------------------
-
     def save(
         self,
         model_compressor: NeuralFieldCompressor,
         idx: int,
-        timestep: int,
-        last_full_save: int,
+        elapsed_time: int,
         filter: FilterSpec = "all",
         overwrite: bool = False,
     ):
-        """Save model parameters for a given *timestep*.
+        """Save model parameters for a given *idx* and *elapsed_time*.
 
         Parameters
         ----------
         model_compressor : NeuralFieldCompressor
             The model to checkpoint.
         idx : int
-            Logical snapshot index.
-        last_full_save : int
-            The idx of the last full-parameter checkpoint, needed for fast restore of the model, especially
-            useful when using LoRA saves.
-        timestep : float
-            The simulation timestep corresponding to this checkpoint, for metadata purposes.
+            Logical snapshot index. This corresponds to an identifier for the current compression state.
+            During ANTIC, this index is typically updated by the temporal selector. 
+        elapsed_time : float
+            The simulation elapsed time corresponding to this checkpoint, for metadata purposes.
         filter : FilterSpec
             Which parameters to save.  Accepts a preset name
             (``"all"``, ``"lora"``), an ``nnx`` variable type
             (e.g. ``nnx.LoRAParam``), or any callable filter spec
             accepted by ``nnx.state``.  Entries saved with
-            ``filter="all"`` act as full-parameter anchors for the
+            ``filter="all"`` act as full parameter anchors for the
             restore-plan logic.
 
         Returns
         -------
         None
         """ 
-        if not isinstance(last_full_save, int):
-            raise TypeError(f"last_full_save must be an int, got {type(last_full_save)}")
-        if last_full_save > idx:
-            raise ValueError(f"last_full_save ({last_full_save}) cannot be greater than current idx ({idx}).")
+
+        if filter == "all":
+            self.last_full_save = idx
         
         resolved = resolve_filter(filter)
         state = extract_state(model_compressor.model, resolved)
@@ -130,7 +134,7 @@ class ParamManager:
         if ckpt_dir.exists() and not overwrite:
             raise FileExistsError(f"Checkpoint directory {ckpt_dir} already exists.")
 
-        if overwrite:
+        if overwrite and ckpt_dir.exists():
             print(f"Overwriting existing checkpoint at {ckpt_dir}...")
             self.checkpointer.save(os.path.abspath(ckpt_dir / "state"), state, force=True)
         else:
@@ -139,9 +143,9 @@ class ParamManager:
 
         save_metadata = {
             "idx": idx,
-            "timestep": timestep,
+            "elapsed_time": elapsed_time,
             "filter": filter_name,
-            "last_full_save": last_full_save,
+            "last_full_save": self.last_full_save,
             "norm_stats": model_compressor.norm_stats,
         }
         if filter_name == "lora":
@@ -151,32 +155,28 @@ class ParamManager:
             pickle.dump(save_metadata, f)
         
 
-    # ------------------------------------------------------------------
-    # Loading
-    # ------------------------------------------------------------------
-
     def load(
         self,
-        id: int,
-        batch_size: int = 1,
+        id: int
     ) -> NeuralFieldCompressor:
-        """Restore parameters from a checkpoint.
+        """Restore parameters from a compressed snapshot.
+
+        If the compressed snapshot corresponds to a full paramater save, then these are directly loaded. 
+        If instead the snapshot corresponds to a partial save (e.g. only LoRA parameters or hidden layers), 
+        then the most recent full parameter save is first loaded, then updated with the current restored state.
+
+        If the metadata file inside the compressed snapshot directory contained normalization stats,
+        these are also loaded and returned as part of the `NeuralFieldCompressor` instance.
 
         Parameters
         ----------
         id : int
-            Which checkpoint to load.
-        batch_size : int
-            For LoRA checkpoints, how many delta checkpoints to load
-            and merge at once.  A batch of deltas is loaded in parallel
-            (threaded I/O), then A and B matrices are concatenated along
-            the rank dimension and folded via a single matmul per layer.
-            ``1`` (default) gives the original sequential behaviour.
+            Which compressed snapshot to load (i.e. which idx was used during saving). Must correspond to an existing compressed snapshot.
 
         Returns
         -------
-        model : BaseCompressor
-            A model instance from training config with parameters loaded from disk.
+        model : NeuralFieldCompressor
+            A `NeuralFieldCompressor` instance from training config with parameters loaded from disk.
         """
 
         model = model_fn[self.model_name](**self.model_cfg, rngs=nnx.Rngs(0))
@@ -225,7 +225,7 @@ class ParamManager:
         return model_comp
 
     def _load_meta(self) -> dict:
-        """Load the checkpoint metadata .pkl from disk, or return an empty template."""
+        """Load the compressed snapshot metadata .pkl from disk, or return an empty template."""
         if self._meta_path.exists():
             with open(self._meta_path, "rb") as f:
                 return pickle.load(f)
