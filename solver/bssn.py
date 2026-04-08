@@ -41,21 +41,22 @@ State = Dict[str, jax.Array]
 
 
 class BSSNSolver(Solver):
-    """BSSN 3+1 numerical-relativity solver wrapping JAX_NR.
+    """BSSN 3+1 numerical relativity solver wrapping JAX_NR.
 
     State is a dictionary of BSSN variables with keys:
     ``'lapse'``, ``'beta'``, ``'conf_metric'``, ``'conf_a'``,
     ``'K'``, ``'W'``, ``'conf_gamma'``.
 
-    The :meth:`extract` method returns the conformal factor ``W`` field
-    (shape ``(n, n, n)``) as a representative snapshot for selectors /
-    compressors.  If you need all BSSN fields, access the state dict
-    directly.
+    The :meth:`extract` method returns the main BSSN variables
+    excluding shift vector (``'beta'``), while ``lapse`` is kept
+    for visualization purposes, but as a gauge variable it is not
+    present in the calculation of the Weyl scalar, the quantity 
+    of interest in black hole merger simulations. 
 
     Parameters
     ----------
     config_path : str or Path
-        Path to a JAX_NR YAML config file (parsed by ``load_config``).
+        Path to a JAX_NR YAML config file, found in ``configs/solver/bssn.yaml``
     """
 
     def __init__(self, config : BaseModel):
@@ -96,7 +97,7 @@ class BSSNSolver(Solver):
         )
 
     def _build_boundary_variables(self, bssn_variables: State) -> None:
-        """Construct flat-space (Minkowski) boundary values matching the current grid shape."""
+        """Construct boundary conditions given the BSSN variables."""
         gd = self.grid_dims
         self.boundary_variables = {
             "conf_metric": jnp.tile(
@@ -110,16 +111,18 @@ class BSSNSolver(Solver):
             "beta": jnp.zeros_like(bssn_variables["beta"]),
         }
 
+    @staticmethod
     def _convert_bssn_var_to_array(bssn_variables: State) -> jnp.ndarray:
-        """Pack the BSSN variable dictionary into a single concatenated array (excluding gauge fields)."""
+        """Pack the BSSN variable dictionary into a single concatenated array shape (N, 18) (excluding the shift vector)."""
         bssn_array = bssn_dict_to_array(bssn_variables)
         return jnp.concatenate([
             bssn_array[:3],
             bssn_array[6:],
         ], axis=0)
     
+    @staticmethod
     def _convert_jac_var_to_dict(jac_variables: State) -> jnp.ndarray:
-        """Pack the Jacobian variable dictionary into a single concatenated array (excluding gauge fields)."""
+        """Pack the Jacobian variable dictionary into a single concatenated array shape (N, 3, 18) (excluding the shift vector)."""
         jac_array = jac_dict_to_array(jac_variables)
         return jnp.concatenate([
             jac_array[:3],
@@ -127,7 +130,7 @@ class BSSNSolver(Solver):
         ], axis=0)
 
     def step(self, bssn_variables: State) -> State:
-        """Advance the BSSN system by one backward-Euler time step."""
+        """Advance the BSSN system by one backward Euler time step."""
         old = self._copy_state_jit(bssn_variables)
         new = self._backward_euler_jit(
             old,
@@ -176,7 +179,7 @@ class BSSNSolver(Solver):
         return self.coords
     
     def save_state(self, bssn_variables: State, directory: str | Path) -> None:
-        """Persist the BSSN variables and elapsed time to *directory*."""
+        """Store the BSSN variables and elapsed time to *directory*."""
         save_dir = Path(directory)
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / "bssn_variables.pkl", "wb") as f:
@@ -185,7 +188,7 @@ class BSSNSolver(Solver):
             pickle.dump(self.elapsed_time, f)
 
     def load_state(self, directory: str | Path) -> State:
-        """Load BSSN variables from a checkpoint or initial-conditions file.
+        """Load BSSN variables from a checkpoint or initial conditions file.
 
         Also builds the flat-space boundary variables and resets the elapsed
         time counter.
@@ -194,8 +197,8 @@ class BSSNSolver(Solver):
         ----------
         directory : str or Path
             Directory containing ``bssn_variables.pkl`` (and optionally
-            ``elapsed_time.pkl``).  If *None*, the path is taken from
-            ``config.load_initial_data``.
+            ``elapsed_time.pkl``). If ``elapsed_time.pkl`` is not found, 
+            it will be initialized to 0.0, assuming a fresh run.
 
         Returns
         -------
@@ -281,7 +284,7 @@ class BSSNSolver(Solver):
         n_theta: int = 512,
         n_phi: int = 512,
     ) -> jax.Array:
-        """Compute the Weyl scalar Ψ₄ SWSH coefficients at given extraction radii.
+        """Compute the Weyl scalar Ψ₄ SWSH coefficients at given extraction radius.
 
         Parameters
         ----------
@@ -295,7 +298,7 @@ class BSSNSolver(Solver):
         Returns
         -------
         jax.Array
-            Spin-weighted spherical-harmonic coefficients of Ψ₄.
+            Integrated spin-weighted spherical-harmonic coefficient of Ψ₄ over the extraction sphere.
         """
         adm = self.compute_adm_variables(bssn_variables)
 

@@ -35,12 +35,16 @@ class KolmogorovSolver(Solver):
         Grid resolution (square: ns × ns).
     domain : tuple of tuple of float
         Physical domain extents, e.g. ``((0, 2π), (0, 2π))``.
+    total_time : float
+        Total physical time to simulate.
     viscosity : float
         Kinematic viscosity.
     max_velocity : float
         Maximum velocity magnitude (used for CFL-based dt).
     anti_aliasing : bool
         Whether to apply a 2/3-rule dealiasing filter.
+    outer_steps : int
+        Number of snapshots needed to complete the full simulation up to `total_time`.
     mol : callable
         JAX-CFD time-stepping method (e.g.
         ``spectral.time_stepping.crank_nicolson_rk4``).
@@ -89,6 +93,13 @@ class KolmogorovSolver(Solver):
     def initialize(self, seed: int = 42, peak_wavenumber: int = 4) -> jnp.ndarray:
         """Create a random initial vorticity field in Fourier space.
 
+        Parameters
+        ----------
+        seed : int
+            Random seed for initial condition generation.
+        peak_wavenumber : int
+            Wavenumber at which to peak the initial velocity spectrum (e.g. 4 for Kolmogorov flow).
+
         Returns
         -------
         vorticity_hat : jnp.ndarray, shape ``(ns, ns // 2 + 1)``
@@ -105,7 +116,7 @@ class KolmogorovSolver(Solver):
         return jax.jit(cfd.funcutils.repeated(self.outer_step_fn, 1))(state)
     
     def extract(self, state: jnp.ndarray) -> jnp.ndarray:
-        """Convert Fourier-space vorticity to a real-space column vector."""
+        """Convert Fourier-space vorticity to a real-space array."""
         return jnp.fft.irfftn(state, s=(self.ns, self.ns), axes=(0, 1)).reshape(-1, 1)
 
     def rollout(self, state: jnp.ndarray, n_steps: int):
@@ -119,9 +130,8 @@ class KolmogorovSolver(Solver):
         """Save the Fourier-space state and elapsed time on disk."""
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
-        filename = os.path.join(directory, f"solver")
-        jnp.save(filename + "/state.npy", state)
-        json.dump({"elapsed_time": self.elapsed_time}, open(filename + "/metadata.json", "w"), indent=2)
+        jnp.save(os.path.join(directory, "state.npy"), state)
+        json.dump({"elapsed_time": self.elapsed_time}, open(os.path.join(directory, "metadata.json"), "w"), indent=2)
 
     def load_state(self, directory: str) -> jnp.ndarray:
         """Load a previously saved Fourier-space state and elapsed time from a saved directory."""

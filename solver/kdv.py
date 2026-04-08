@@ -25,6 +25,8 @@ class KDVSolver(Solver):
         Physical domain length.
     nonlinparameter : float
         Nonlinear coefficient in the KdV equation.
+    total_time : float
+        Total physical time to simulate.
     dt : float
         Time step size for RK4 integration.
     """

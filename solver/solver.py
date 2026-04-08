@@ -16,51 +16,41 @@ State = Any
 class Solver(ABC):
     """Wraps an arbitrary PDE time-stepping function.
 
-    The user only needs to supply a *step function* with the signature::
+    The user needs to supply a *step function* with the signature::
 
         next_state = step_fn(state)
 
     and an *extract function* that pulls the field data (a single array) out
-    of ``state`` so the selector / compressor can analyse it::
+    of ``state`` so the selector or compressor can work with it::
 
         field = extract_fn(state)   # -> jnp.ndarray
 
-    Parameters
-    ----------
-    step_fn : callable
-        ``step_fn(state) -> state``.  Advances the PDE by one time step.
-        This can come from any source: a pure-Python integrator, a JAX-CFD
-        routine, a C++/pybind11 binding, etc.
-    extract_fn : callable, optional
-        ``extract_fn(state) -> jnp.ndarray``.  Extracts the field snapshot
-        from ``state``.  If ``state`` already *is* the snapshot array you
-        can leave this as ``None`` (identity is used).
-    dt : float, optional
-        Physical time step size (informational; not used internally).
-    metadata : dict, optional
-        Any extra information about the solver (PDE name, parameters, …).
+    The solver abstraction is designed to be as flexible as possible, so the
+    user can use any PDE, any time-stepping method, and any state structure they like.
+    
+    In addition, the user should define a ``rollout`` method that advances the state by multiple time steps, 
+    a ``prepare_coords`` method that prepares the coordinates for the neural compressor, either normalized
+    or in their original form. Finally, the user should implement ``save_state`` and ``load_state`` methods 
+    to allow saving and loading the solver state to disk, which is necessary for checkpointing.
 
     Examples
     --------
-    **Minimal — state is the field itself**::
+    ::
+    
+        solver = MySolver(...)
+        selector = MySelector(...)
+        state = solver.load_state(...) / solver.init(...) / solver.init_condition(...)
+        while True:
+            state = solver.step(state)
+            field = solver.extract(state)
+            keep = selector.step(field or state):
+            
+            if not keep:
+                continue  # Skip compression this snapshot
+                
+            # Compress and save the snapshot here
+            compress(field, ...)
 
-        solver = Solver(step_fn=my_rk4_step)
-
-    **JAX-CFD style — state is a Fourier coefficient array**::
-
-        import jax.numpy as jnp
-        solver = Solver(
-            step_fn=jaxcfd_step,
-            extract_fn=lambda vhat: jnp.fft.irfftn(vhat, s=(N, N)),
-            dt=dt,
-        )
-
-    **C++ binding**::
-
-        solver = Solver(
-            step_fn=cpp_module.advance,
-            extract_fn=lambda s: jnp.array(s.field),
-        )
     """
 
     @abstractmethod
