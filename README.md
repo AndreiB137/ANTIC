@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/JAX-0.7.0+-blue?logo=google&logoColor=white" alt="JAX"/>
+  <img src="https://img.shields.io/badge/JAX-latest-blue?logo=google&logoColor=white" alt="JAX"/>
   <img src="https://img.shields.io/badge/Flax-NNX-green" alt="Flax NNX"/>
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License"/>
   <img src="https://img.shields.io/badge/Python-3.10+-brightgreen?logo=python&logoColor=white" alt="Python"/>
@@ -24,7 +24,7 @@
 
 ---
 
-**ANTIC** is a JAX-based framework for **adaptive in-situ neural compression** of large-scale PDE simulations. Instead of storing every simulation snapshot to disk, ANTIC runs alongside the solver, intelligently selects which snapshots are physically important using **Physics-Aware Temporal Selection (PATS)**, and trains lightweight neural fields to encode them — achieving orders-of-magnitude compression while preserving scientific fidelity.
+**ANTIC** is a JAX-based framework for **adaptive in-situ neural compression** of PDE simulations. Instead of storing every simulation snapshot to disk, ANTIC runs alongside the solver, selecting which snapshots are physically important using **Physics-Aware Temporal Selection (PATS)**, and trains lightweight neural fields to encode them, achieving orders of magnitude compression while preserving scientific fidelity.
 
 ---
 
@@ -112,7 +112,7 @@ The Kolmogorov experiment simulates 2D turbulence driven by a sinusoidal body fo
 
 ### BSSN Numerical Relativity
 
-The BSSN experiment handles 3D gravitational wave simulations using the BSSN formulation of Einstein's field equations. ANTIC uses the WIRE architecture (Gabor wavelet activations) with LoRA rank-16 fine-tuning and surge-based temporal selection on the Weyl scalar $\Psi_4$.
+The BSSN experiment handles 3D binary black hole mergers using the BSSN formulation of Einstein's field equations.
 
 <p align="center">
   <img src="misc/lapse_comparison_ts3240-1.png" alt="Lapse Comparison ts=3240" width="400"/>
@@ -128,6 +128,13 @@ The BSSN experiment handles 3D gravitational wave simulations using the BSSN for
   <img src="misc/weyl_magnitude_vs_time-1.png" alt="Weyl Magnitude vs Time" width="600"/>
 </p>
 <p align="center"><em> Comparing the Weyl scalar $|\Psi_4|$ magnitude between the original trajectory and the neural compressor. The temporal reconstructed quantity is in very good agreement with small differences, but more esentially capturing the correct trend in the Weyl scalar magnitude before and throughout the merger event.</em></p>
+
+<p align="center">
+    <img src="misc/compression_table.png"
+    alt="Neural field compressor versus classical compressors" width="600"/>
+</p>
+
+<p align="center"><em> Neural field compressor compared against a list of well established classical compressors. CR stands for compression ratio and second column is the compression time. All compressors have been tested on CPU, although most of them have GPU support. </em></p>
 
 ---
 
@@ -209,7 +216,7 @@ pip install pysz        # SZ3 compression
 
 ### 7. Some info regarding version compatibility
 
-The code was executed successfully with the latest `jax` (0.9.2), `flax` (0.12.6), `optax` (0.2.8), `orbax` (0.11.33). However consider the soap optimizer as experimental or try to downgrade to an older `flax` version in order to use it.
+The code was executed successfully with the latest `jax` (0.9.2), `flax` (0.12.6), `optax` (0.2.8), `orbax` (0.11.33). However, consider the soap optimizer as experimental or try to downgrade to an older `flax` version in order to use it.
 
 ---
 
@@ -252,15 +259,18 @@ python main.py --config configs/kdv.yaml \
 
 ### Resume from Checkpoint
 
-ANTIC automatically detects existing checkpoints in the `save_dir` and resumes training:
+ANTIC automatically detects existing checkpoints in `training.save_dir` and resumes training:
 
 ```bash
 # First run (interrupted or completed)
 python main.py --config configs/kolmogorov.yaml
 
 # Re-running picks up where it left off
-python main.py --config configs/kolmogorov.yaml
+python main.py --config configs/kolmogorov.yaml \
+                --override training.stop_at=...
 ```
+
+Specify `training.stop_at` to be greater than the previous. `stop_at` represents the simulatio time at which to stop the compression. If `stop_at='inf'`, then ANTIC pipeline will finish only when the simulation has reached the `total_time`.
 
 ---
 
@@ -283,7 +293,7 @@ model:
   fourier_emb_scale: 7.0    # MLP/MLP+ only
 
 optimizer:
-  name: adamw                # adamw | soap
+  name: adamw                # adamw | adamaxw | nadamw | lamb | lion | novograd | lars | adan | soap
   learning_rate: 1.0e-2
   weight_decay: 1.0e-4
   scheduler:
@@ -293,6 +303,8 @@ optimizer:
 training:
   initial_epochs: 200        # epochs for the first snapshot
   subsequent_epochs: 100     # epochs for later snapshots (LoRA)
+  rank: 8                    # rank of LoRA matrices
+  reset_every_n: 50          # Only used when filter = lora
   batch_size: 10000          # null for full-batch
   filter: all                # all | lora | hidden_layers
   stop_at: 2.0              # stop at this physical time, use 'inf' for no stop
@@ -308,10 +320,11 @@ selector:
   window_size: 5
 
 wandb:
-  enabled: true
+  enabled: false
   project: ANTIC
   name: my-experiment
-  tags: [kolmogorov, mlp]
+  tags: [kolmogorov, mlp+, all]
+  log_every: 1
 ```
 
 See [`configs/schema.py`](configs/schema.py) for the full Pydantic schema with all available parameters and defaults.
@@ -362,6 +375,7 @@ ANTIC/
 │       └── utils_lora.py            # LoRA layer, add/remove/merge utilities
 ├── pats/
 │   ├── pats.py                      # PATS orchestrator
+│   ├── no_selector.py               # Dummy class for no selector.
 │   ├── kdv_selector.py              # KdV quantile-based selector
 │   ├── enstrophy_selector.py        # Enstrophy-based selector (Kolmogorov)
 │   └── bssn_median_selector.py      # Weyl scalar surge detector (BSSN)
