@@ -1,3 +1,6 @@
 from .kdv import run_kdv
 from .kolmogorov import run_kolmogorov
-from .bssn import run_bssn
+try:
+    from .bssn import run_bssn
+except ImportError:
+    run_bssn = None

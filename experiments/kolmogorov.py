@@ -1,13 +1,3 @@
-"""KdV soliton experiment for ANTIC.
-
-Runs an in-situ compression loop: advance the KdV PDE one step at a time,
-decide via the physics-aware temporal selector (PATS) whether this snapshot
-is important, and if so, train the neural field compressor on it.
-
-Supports LoRA fine-tuning with periodic merge/reset, NaN debugging via JAX,
-and early stopping based on a user-specified maximum physical time.
-"""
-
 from __future__ import annotations
 
 import json
@@ -40,7 +30,7 @@ from param_manager import ParamManager
 
 
 def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
-    """Run the full Kolmogorov ANTIC compression experiment."""
+    """Run the Kolmogorov ANTIC compression experiment."""
 
     # ---- wandb --------------------------------------------------
     if cfg.wandb.enabled:
@@ -109,13 +99,14 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
     # ---- coordinates --------------------------------------------
     coords = solver.prepare_coords()
 
-    # ---- initial condition: 4 solitons --------------------------
+    # ---- initial condition or load checkpoint --------------------------
     if run_checkpoint:
         state = solver.load_state(
             cfg.training.save_dir + "/checkpoint/solver"
         )
     else:
-        state = solver.initialize()
+        if cfg.selector.type != "none":
+            state = solver.initialize()
 
     # ---- selector -----------------------------------------------
     selector = build_selector(cfg.selector)
@@ -127,8 +118,8 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
             selector.init(initial_field)
 
     # Determine which variables the optimizer should track
-    wrt = resolve_filter(cfg.training.filter)
-
+    nnx_filter = resolve_filter(cfg.training.filter)
+    
     # Train on the initial snapshot (snapshot 0)
     batch_size = cfg.training.batch_size
     decay_steps_init = compute_decay_steps(coords, batch_size, cfg.training.initial_epochs)
@@ -158,7 +149,6 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
             target=target,
             epochs=cfg.training.initial_epochs,
             batch_size=batch_size,
-            filter="all",
             num_devices=cfg.training.num_devices,
             verbose=cfg.training.verbose,
         )
@@ -166,8 +156,7 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
         param_manager.save(
             nf_compressor,
             idx=0,
-            timestep=solver.elapsed_time,
-            last_full_save=0,
+            elapsed_time=solver.elapsed_time,
             filter='all',
         )
 
@@ -194,23 +183,23 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
             continue
 
         # Extract target field for compression
-        target = selector.last_selected
+        if cfg.selector.type != "none":
+            target = selector.last_selected
+        else:
+            target = field
         # ---- LoRA periodic reset (merge + remove + retrain from scratch) ----
         if cfg.training.filter == 'lora' and cfg.training.reset_every_n > 0:
             if selector.selected_num % cfg.training.reset_every_n == 0:
                 print(f"[lora]   reset_every_n reached ({selector.selected_num}): merging & removing LoRA, retraining from scratch")
                 remove_lora_from_model(nf_compressor.model, merge=True)
-                wrt = nnx.Param
-                param_manager.last_full_save = selector.selected_num - 1
+                nnx_filter = nnx.Param
 
         if cfg.normalization.enabled:
             norm_stats.update(target)
             target = norm_stats.normalize(target)
             nf_compressor.norm_stats = norm_stats.stats()
 
-        print(target.max(), target.min())
-
-        optimizer = build_nnx_opt(nf_compressor.model, opt_tx_after, wrt=wrt)
+        optimizer = build_nnx_opt(nf_compressor.model, opt_tx_after, wrt=nnx_filter)
 
         loss = nf_compressor.compress(
             optimizer=optimizer,
@@ -218,7 +207,6 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
             target=target,
             epochs=cfg.training.subsequent_epochs,
             batch_size=batch_size,
-            filter=cfg.training.filter,
             num_devices=cfg.training.num_devices,
             verbose=cfg.training.verbose,
         )   
@@ -235,37 +223,33 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
 
             nf_compressor.model = build_model(cfg.model, seed=cfg.seed)  # Rebuild the base model to reset parameters
 
-            wrt = nnx.Param
-            param_manager.last_full_save = selector.selected_num - 1
+            nnx_filter = nnx.Param
 
-            optimizer = build_nnx_opt(nf_compressor.model, opt_tx_after, wrt=wrt)
+            optimizer = build_nnx_opt(nf_compressor.model, opt_tx_after, wrt=nnx_filter)
             loss = nf_compressor.compress(
                 optimizer=optimizer,
                 coords=coords,
                 target=target,
                 epochs=cfg.training.subsequent_epochs,
                 batch_size=batch_size,
-                filter=cfg.training.filter,
                 num_devices=cfg.training.num_devices,
                 verbose=cfg.training.verbose,
             )
 
         save_filter = cfg.training.filter
-        if wrt == nnx.Param:
-            param_manager.last_full_save = selector.selected_num - 1
+        if nnx_filter == nnx.Param:
             save_filter = "all"
 
         param_manager.save(
             nf_compressor,
             idx=selector.selected_num - 1,
-            timestep=solver.elapsed_time,
-            last_full_save=param_manager.last_full_save,
+            elapsed_time=solver.elapsed_time,
             filter=save_filter,
             overwrite=True
         )
 
         log_msg = f"[Snapshot {selector.idx:>4d}]  t={solver.elapsed_time:.6f}  loss={float(loss):.4e}, temporal_compression_ratio = {selector.compress_ratio():.2f}"
-        log_msg += f", neural_compression_ratio={len(target) / nf_compressor.count_params(wrt):.2f}"
+        log_msg += f", neural_compression_ratio={len(target) / nf_compressor.count_params(nnx_filter):.2f}"
         print(log_msg)
 
         target = norm_stats.denormalize(target) if cfg.normalization.enabled else target
@@ -274,9 +258,9 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
         extra_metrics_str = ", ".join([f"{k}={v:.4e}" for k, v in extra_metrics.items()])
         print(f"extra_metrics: {extra_metrics_str}")
 
-        if wrt != nnx.LoRAParam:
+        if nnx_filter != nnx.LoRAParam:
             if cfg.training.filter == 'lora':
-                add_lora_to_model(nf_compressor.model, rank=cfg.training.rank, rngs=nnx.Rngs(cfg.seed + selector.selected_num))
+                add_lora_to_model(nf_compressor.model, rank=cfg.training.rank, rngs=nnx.Rngs(cfg.seed))
 
         if cfg.wandb.enabled and selector.selected_num % cfg.wandb.log_every == 0:
             wandb.log({"snapshot": selector.idx, 
@@ -284,14 +268,13 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
                        "physical_time": solver.elapsed_time, 
                        "selected_count": selector.selected_num,
                        "temporal_compression_ratio": selector.compress_ratio(),
-                       "neural_compression_ratio": len(target) / nf_compressor.count_params(wrt),
+                       "neural_compression_ratio": len(target) / nf_compressor.count_params(nnx_filter),
                        **extra_metrics,
                        })
         
 
-        wrt = resolve_filter(cfg.training.filter)  # recompute wrt in case filter is dynamic (e.g. LoRA reset)
+        nnx_filter = resolve_filter(cfg.training.filter)  # recompute nnx_filter in case filter is dynamic (e.g. LoRA reset)
         # Check physical time limit
-        print(param_manager.last_full_save)
         if cfg.training.stop_at != 'inf' and solver.elapsed_time >= cfg.training.stop_at:
             # Save state so user can resume later
             ckpt_dir = cfg.training.save_dir + "/checkpoint"
@@ -312,6 +295,10 @@ def run_kolmogorov(cfg: ExperimentConfig, run_checkpoint: bool = False):
             with open(ckpt_dir + "/info.json", "w") as f:
                 json.dump(info_save, f, indent=2)
             print(f"[checkpoint] saved at t={solver.elapsed_time:.6f}")
+            break
+
+        if solver.elapsed_time >= cfg.solver.total_time:
+            print(f"[done] Reached end of solver integration at t={solver.elapsed_time:.6f}")
             break
 
     # ---- cleanup ------------------------------------------------
