@@ -131,10 +131,14 @@ class ParamManager:
 
         filter_name = filter if isinstance(filter, str) else type(filter).__name__
         ckpt_dir = self.compressed_dir / f"snapshot_{idx}"
-        if ckpt_dir.exists() and not overwrite:
+        ckpt_dir_exists = ckpt_dir.exists()
+
+        if ckpt_dir_exists and not overwrite:
             raise FileExistsError(f"Checkpoint directory {ckpt_dir} already exists.")
 
-        if overwrite and ckpt_dir.exists():
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+        if overwrite and ckpt_dir_exists:
             print(f"Overwriting existing checkpoint at {ckpt_dir}...")
             self.checkpointer.save(os.path.abspath(ckpt_dir / "state"), state, force=True)
         else:

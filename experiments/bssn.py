@@ -73,7 +73,7 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
 
     # ---- solver -------------------------------------------------
     solver = build_solver(cfg.solver)
-    print(f"[solver] bssn  N={solver.grid.n}  domain_width={solver.grid.domain_width} dt={solver.evolution.dt}")
+    print(f"[solver] bssn  N={cfg.solver.grid.n}  domain_width={cfg.solver.grid.domain_width} dt={cfg.solver.evolution.dt}")
 
     # ---- model --------------------------------------------------
 
@@ -81,13 +81,8 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
     if run_checkpoint:
         nf_compressor = param_manager.load(id=info["snapshot_id"])
         model = nf_compressor.model
-        if cfg.normalization.enabled:
-            norm_stats = build_normalization(cfg.normalization)
-            norm_stats.load_stats(cfg.training.save_dir + "/checkpoint/norm_stats.pkl")
     else:
         model = build_model(cfg.model, seed=cfg.seed)
-        if cfg.normalization.enabled:
-            norm_stats = build_normalization(cfg.normalization)
 
     print(f"[model]  {cfg.model.name}  hidden_dim={cfg.model.hidden_dim}  "
           f"layers={cfg.model.num_hidden_layers}")
@@ -135,17 +130,20 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
 
         target = solver.extract(state)
 
-        if cfg.normalization.enabled:
-            norm_stats.update(target)
-            target = norm_stats.normalize(target)
-            nf_compressor.norm_stats = norm_stats.stats()
-
         optimizer = build_nnx_opt(nf_compressor.model, opt_tx_init, wrt=nnx.Param)
+
+        # Extract target field for compression
+        jac_target = None
+        if cfg.training.use_jac:
+            target, jac_target = solver.extract(state, cfg.training.use_jac)
+        else:
+            target = solver.extract(state)
 
         loss = nf_compressor.compress(
             optimizer=optimizer,
             coords=coords,
             target=target,
+            jac_target=jac_target,
             epochs=cfg.training.initial_epochs,
             batch_size=batch_size,
             num_devices=cfg.training.num_devices,
@@ -159,10 +157,16 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
             filter='all',
         )
 
-        print(f"[Snapshot {selector.idx:>4d}]  t={0.0:.4e}  loss={float(loss):.4e}  (initial)")
+        if jac_target is not None:
+            print(f"[Snapshot {selector.idx:>4d}]  t={0.0:.4e}  total_loss={float(loss[0] + loss[1]):.4e} target_loss = {float(loss[0]):.4e} jacobian_loss = {float(loss[1]):.4e} (initial)")
+        else:
+            print(f"[Snapshot {selector.idx:>4d}]  t={0.0:.4e}  loss={float(loss):.4e} (initial)")
 
         if cfg.wandb.enabled:
-            wandb.log({"snapshot": selector.idx, "loss": float(loss), "physical_time": 0.0})
+            if jac_target is not None:
+                wandb.log({"snapshot": selector.idx, "loss": float(loss[0] + loss[1]), "loss_target": float(loss[0]), "loss_jacobian": float(loss[1]), "physical_time": 0.0})
+            else:
+                wandb.log({"snapshot": selector.idx, "loss": float(loss), "physical_time": 0.0})
     
     # ---- LoRA setup ---------------------------------------------
     if cfg.training.filter == 'lora':
@@ -192,11 +196,6 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
                 remove_lora_from_model(nf_compressor.model, merge=True)
                 nnx_filter = nnx.Param
 
-        if cfg.normalization.enabled:
-            norm_stats.update(target)
-            target = norm_stats.normalize(target)
-            nf_compressor.norm_stats = norm_stats.stats()
-
         optimizer = build_nnx_opt(nf_compressor.model, opt_tx_after, wrt=nnx_filter)
 
         loss = nf_compressor.compress(
@@ -211,7 +210,11 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
         )   
 
         # ---- NaN debugging: reset compressor if NaN detected ----
-        if jnp.isnan(loss):
+        if jac_target is not None:
+            loss_nan = loss[0]
+        else:
+            loss_nan = loss
+        if jnp.isnan(loss_nan):
             
             print(f"[warn]   NaN detected at snapshot {selector.idx} (t={solver.elapsed_time:.6f}). "
                   "Removing LoRA adapters and resetting parameters.")
@@ -248,15 +251,27 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
             overwrite=True
         )
 
-        log_msg = f"[Snapshot {selector.idx:>4d}]  t={solver.elapsed_time:.6f}  loss={float(loss):.4e}, temporal_compression_ratio = {selector.compress_ratio():.4f}"
+        if jac_target is not None:
+            log_msg = f"[Snapshot {selector.idx:>4d}]  t={solver.elapsed_time:.6f}  total_loss={float(loss[0] + loss[1]):.4e} target_loss = {float(loss[0]):.4e} jacobian_loss = {float(loss[1]):.4e}, temporal_compression_ratio = {selector.compress_ratio():.4f}"
+        else:
+            log_msg = f"[Snapshot {selector.idx:>4d}]  t={solver.elapsed_time:.6f}  loss={float(loss):.4e}, temporal_compression_ratio = {selector.compress_ratio():.4f}"
+       
         log_msg += f" , neural_compression_ratio={len(target) / nf_compressor.count_params(nnx_filter):.2f}"
         print(log_msg)
 
-        target = norm_stats.denormalize(target) if cfg.normalization.enabled else target
+        extra_metrics_jac = None
+        if cfg.training.use_jac:
+            extra_metrics, extra_metrics_jac = nf_compressor.compute_extra_metrics(coords, target, jac_target, batch_size=batch_size)
+        else:
+            extra_metrics = nf_compressor.compute_extra_metrics(coords, target, batch_size=batch_size)
 
-        extra_metrics = nf_compressor.compute_extra_metrics(coords, target, batch_size=batch_size)
+        # extra_metrics = nf_compressor.compute_extra_metrics(coords, target, batch_size=batch_size)
         extra_metrics_str = ", ".join([f"{k}={v:.4e}" for k, v in extra_metrics.items()])
         print(f"[extra metrics]: {extra_metrics_str}")
+        if extra_metrics_jac is not None:
+            extra_metrics_jac_str = ", ".join([f"{k}={v:.4e}" for k, v in extra_metrics_jac.items()])
+            print(f"[extra metrics jacobian]: {extra_metrics_jac_str}")
+
 
         if nnx_filter != nnx.LoRAParam:
             if cfg.training.filter == 'lora':
@@ -264,12 +279,15 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
 
         if cfg.wandb.enabled and selector.selected_num % cfg.wandb.log_every == 0:
             wandb.log({"snapshot": selector.idx, 
-                       "loss": float(loss),
+                       "loss": float(loss[0] + loss[1]) if jac_target is not None else float(loss),
+                       "loss_target": float(loss[0]) if jac_target is not None else None,
+                       "loss_jacobian": float(loss[1]) if jac_target is not None else None,
                        "physical_time": solver.elapsed_time, 
                        "selected_count": selector.selected_num,
                        "temporal_compression_ratio": selector.compress_ratio(),
                        "neural_compression_ratio": len(target) / nf_compressor.count_params(nnx_filter),
                        **extra_metrics,
+                        **({f"jac_{k}": v for k, v in extra_metrics_jac.items()} if extra_metrics_jac is not None else {})
                        })
         
 
@@ -281,8 +299,6 @@ def run_bssn(cfg: ExperimentConfig, run_checkpoint: bool = False):
             os.makedirs(ckpt_dir, exist_ok=True)
             solver.save_state(state, ckpt_dir + "/solver")
             selector.save_state(ckpt_dir + "/selector")
-            if cfg.normalization.enabled and norm_stats is not None:
-                norm_stats.save_stats(ckpt_dir + "/norm_stats.pkl")
             info_save = {
                 "stop_at": cfg.training.stop_at,
                 "elapsed_time": solver.elapsed_time,

@@ -61,16 +61,16 @@ class BSSNSolver(Solver):
 
     def __init__(self, config : BaseModel):
         self.config = config
-        n = config.grid.n
+        self.n = config.grid.n
 
         # ---- grid setup ----------------------------------------------------
-        grid_info = setup_grid(n, config.grid.domain_width)
+        grid_info = setup_grid(self.n, config.grid.domain_width)
         self.coords = grid_info["coords"]
         self.coord_linspaces = grid_info["coord_linspaces"]
         self.grid = grid_info["grid"]
         self.scale = grid_info["scale"]
         self.grid_dims = grid_info["grid_dims"]
-        self.mask, self.axis_mask = create_grid_masks(n)
+        self.mask, self.axis_mask = create_grid_masks(self.n)
         self.dist = distance_to_boundary(self.grid, self.grid.shape[0])
 
         # ---- damping / evolution params ------------------------------------
@@ -116,18 +116,18 @@ class BSSNSolver(Solver):
         """Pack the BSSN variable dictionary into a single concatenated array shape (N, 18) (excluding the shift vector)."""
         bssn_array = bssn_dict_to_array(bssn_variables)
         return jnp.concatenate([
-            bssn_array[:3],
-            bssn_array[6:],
-        ], axis=0)
+            bssn_array[..., :3],
+            bssn_array[..., 6:],
+        ], axis=-1)
     
     @staticmethod
     def _convert_jac_var_to_dict(jac_variables: State) -> jnp.ndarray:
         """Pack the Jacobian variable dictionary into a single concatenated array shape (N, 3, 18) (excluding the shift vector)."""
         jac_array = jac_dict_to_array(jac_variables)
         return jnp.concatenate([
-            jac_array[:3],
-            jac_array[6:],
-        ], axis=0)
+            jac_array[..., :3],
+            jac_array[..., 6:],
+        ], axis=-1)
 
     def step(self, bssn_variables: State) -> State:
         """Advance the BSSN system by one backward Euler time step."""
@@ -176,7 +176,7 @@ class BSSNSolver(Solver):
         return state
 
     def prepare_coords(self):
-        return self.coords
+        return self.coords.reshape(-1, 3)
     
     def save_state(self, bssn_variables: State, directory: str | Path) -> None:
         """Store the BSSN variables and elapsed time to *directory*."""

@@ -173,7 +173,10 @@ class NeuralFieldCompressor(BaseCompressor):
                     loss_batch = train_step_jit(self.model, optimizer, coords_batch, target_batch)
                     loss += loss_batch
 
-            loss = loss / (coords.shape[0] // batch_size)
+            if jac_target is not None:
+                loss = [l / (coords.shape[0] // batch_size) for l in loss]
+            else:
+                loss /= (coords.shape[0] // batch_size)
 
             if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
                 if jac_target is not None:
@@ -232,8 +235,8 @@ class NeuralFieldCompressor(BaseCompressor):
             coords_batch = coords[batch:batch + batch_size]
             pred.append(self.decompress(coords_batch))
             if jac_target is not None:
-                pred = jnp.transpose(jax.jacfwd(lambda x: self.decompress(x))(coords_batch), (0, 2, 1))
-                pred_jac.append(pred)
+                pred_jac_batch = jnp.transpose(jax.vmap(jax.jacfwd(lambda x: self.decompress(x)))(coords_batch), (0, 2, 1))
+                pred_jac.append(pred_jac_batch)
 
         pred = jnp.concatenate(pred, axis=0)
         pred_jac = jnp.concatenate(pred_jac, axis=0) if jac_target is not None else None
@@ -367,7 +370,7 @@ def target_loss(model, x, y):
 @nnx.jit
 def _jac_loss(model, x, dy):
     """Compute the MSE between the model's Jacobian at ``x`` and the target Jacobian ``dy``."""
-    model_jac = jnp.transpose(jax.jacfwd(lambda x: model(x))(x), (0, 2, 1))
+    model_jac = jnp.transpose(jax.vmap(jax.jacfwd(lambda x: model(x)))(x), (0, 2, 1))
     return _mse_loss(model_jac, dy)
 
 def train_step(

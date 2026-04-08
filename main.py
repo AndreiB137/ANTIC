@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import os
+os.environ["JAX_PLATFORMS"] = "cpu"
 
 from configs import ExperimentConfig
 from experiments import run_kdv, run_kolmogorov
@@ -61,6 +62,34 @@ def _apply_overrides(raw: dict, overrides: list[str]) -> dict:
     return raw
 
 
+def _resolve_solver_config(raw: dict, config_path: str | Path) -> dict:
+    """Resolve solver shorthand or merge solver defaults with inline overrides."""
+    import yaml
+
+    config_path = Path(config_path)
+    solver_val = raw.get("solver")
+    solver_name = None
+    inline_solver = {}
+
+    if isinstance(solver_val, str):
+        solver_name = solver_val
+    elif isinstance(solver_val, dict) and isinstance(solver_val.get("name"), str):
+        solver_name = solver_val["name"]
+        inline_solver = {k: v for k, v in solver_val.items() if k != "name"}
+
+    if solver_name is None:
+        return raw
+
+    solver_cfg_path = config_path.parent / "solver" / f"{solver_name}.yaml"
+    with open(solver_cfg_path) as f:
+        solver_raw = yaml.safe_load(f) or {}
+
+    solver_raw.update(inline_solver)
+    solver_raw["name"] = solver_name
+    raw["solver"] = solver_raw
+    return raw
+
+
 def main():
     parser = argparse.ArgumentParser(description="ANTIC — Adaptive Neural Temporal In-situ Compressor")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
@@ -72,14 +101,7 @@ def main():
     with open(args.config) as f:
         raw = yaml.safe_load(f)
 
-    # Resolve solver shorthand: "solver: kdv" -> load configs/solver/kdv.yaml
-    solver_val = raw.get("solver")
-    if isinstance(solver_val, str):
-        solver_cfg_path = Path(args.config).parent / "solver" / f"{solver_val}.yaml"
-        with open(solver_cfg_path) as f:
-            solver_raw = yaml.safe_load(f) or {}
-        solver_raw["name"] = solver_val
-        raw["solver"] = solver_raw
+    raw = _resolve_solver_config(raw, args.config)
 
     if args.override:
         raw = _apply_overrides(raw, args.override)
