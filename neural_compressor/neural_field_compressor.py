@@ -14,18 +14,18 @@ from .utils import FilterSpec, resolve_filter
 class NeuralFieldCompressor(BaseCompressor):
     """Compressor that represents PDE snapshots as neural fields.
 
-    A *neural field* maps spatial coordinates to field values.  This class
-    trains such a network on one snapshot at a time.
+    A *neural field* maps spatial coordinates to field values. By having less parameters
+    than the original discretized representation of the original snapshot, the neural field can be seen as a compressed representation of the original data. 
 
     Parameters
     ----------
     model : nnx.Module
-        The neural-field architecture (MLP, SIREN, WIRE, …).
-    norm_stats : dict, optional
-        Normalization statistics (e.g. ``{"mean": …, "std": …}``).
-        When set, :meth:`decompress` will
-        denormalize the raw network output before returning it.
-
+        The neural field architecture (MLP, SIREN, WIRE, …).
+    norm_stats : dict[str, Any], optional
+        If given, should contain normalization statistics and method for the target field, e.g. ``{"method": "z-score", "mean": mean, "std": std}``.
+        If provided, the compressor will automatically normalize the target data during training and denormalize the model output during inference.  
+        This can help with training stability, especially for fields with large dynamic ranges.
+        
     Examples
     --------
     ::
@@ -64,30 +64,26 @@ class NeuralFieldCompressor(BaseCompressor):
         jac_target: Optional[jnp.ndarray] = None,
         epochs: int = 500,
         batch_size: int | None = None,
-        filter: Optional[FilterSpec] = "all",
         num_devices: int = 1,
         verbose: bool = False,
     ) -> float:
-        """Train the neural field on a single snapshot.
+        """Train the neural field on a single discrete spatial snapshot.
 
         Parameters
         ----------
         coords : jnp.ndarray
-            Spatial coordinates array (``(N, D)``).
+            Spatial coordinates array. Should have shape ``(N, D)`` with D the number of spatial dimensions.
         target : jnp.ndarray
-            The field values at ``coords``.
+            The field values at ``coords``. Should have shape ``(N, F)`` with F the number of features.
         jac_target : jnp.ndarray, optional
-            If given, the Jacobian of the field at ``coords``.
+            If given, the Jacobian of the field at ``coords``. Should have shape ``(N, D, F)`` with D the number of spatial dimensions and F the number of features.
         epochs : int
-            Number of gradient-descent iterations.
+            Number of gradient descent iterations.
         batch_size : int, optional
             If given, mini-batch training is used.  When ``num_devices > 1``
-            this is the **per-device** batch size; the effective global batch
-            size becomes ``batch_size * num_devices``.
-        filter : FilterSpec, optional
-            Which parameter subset to differentiate through.
+            each device will receive a batch of size ``batch_size`` // ``num_devices``.
         num_devices : int
-            Number of devices (GPUs/TPUs) to use for data-parallel training.
+            Number of devices (GPUs/TPUs) to use for multi-device training.
             Defaults to ``1`` (single device).
         verbose : bool
             Print loss every 10 epochs.
@@ -98,13 +94,21 @@ class NeuralFieldCompressor(BaseCompressor):
             Final loss value.
         """
 
+        if coords.ndim != 2:
+            raise ValueError(f"Expected coords to have shape (N, D), got {coords.shape}")
+        if target.ndim != 2:
+            raise ValueError(f"Expected target to have shape (N, F) with F the number of features, got {target.shape}")
+        if jac_target is not None and jac_target.ndim != 3:
+            raise ValueError(f"Expected jac_target to have shape (N, D, F) with D the number of spatial dimensions and F the number of features, got {jac_target.shape}")
+        
+        if target.shape[0] != coords.shape[0]:
+            raise ValueError(f"Expected target and coords to have the same number of points, got {target.shape[0]} and {coords.shape[0]}")
+
+
         if jac_target is not None:
             loss = [0.0, 0.0]
         else:
             loss = 0.0
-
-        # Resolve string filter specs (e.g. "all" → nnx.Param) for nnx.DiffState.
-        resolved_filter = resolve_filter(filter) if isinstance(filter, str) else filter
 
         if batch_size is None:
             batch_size = coords.shape[0]
@@ -113,6 +117,8 @@ class NeuralFieldCompressor(BaseCompressor):
         available_devices = jax.local_devices()
         num_devices = min(num_devices, len(available_devices))
         use_sharding = num_devices > 1
+
+        filter = optimizer.wrt
 
         if use_sharding:
             devices = available_devices[:num_devices]
@@ -132,15 +138,15 @@ class NeuralFieldCompressor(BaseCompressor):
             opt_state = jax.device_put(opt_state, replicated_sharding)
             nnx.update(optimizer, opt_state)
 
-        key = jax.random.PRNGKey(0)
-
         @nnx.jit
         def train_step_jac_jit(model, optimizer, coords, target, jac_target):
-            return train_step_with_jac(model, optimizer, coords, target, jac_target, resolved_filter)
+            return train_step_with_jac(model, optimizer, coords, target, jac_target, filter)
         
         @nnx.jit
         def train_step_jit(model, optimizer, coords, target):
-            return train_step(model, optimizer, coords, target, resolved_filter)
+            return train_step(model, optimizer, coords, target, filter)
+
+        key = jax.random.PRNGKey(0)
 
         for epoch in range(epochs):
             key, _ = jax.random.split(key)
@@ -188,21 +194,30 @@ class NeuralFieldCompressor(BaseCompressor):
                               target: jnp.ndarray, 
                               jac_target: Optional[jnp.ndarray] = None,
                               batch_size: int = 100_000) -> dict[str, float]:
-        """Compute extra metrics like PSNR, SSIM, or Jacobian error.
+        """Test the neural field compression by comparing it to the ground truth
+        on different metrics. If ``jac_target`` is given, metrics are computed for both the field values and the Jacobian.
+
+        The list of metrics includes:
+        - PSNR
+        - Max absolute error
+        - Mean absolute error
+        - Relative L2 error
+        - L2 error
 
         Parameters
         ----------
         coords : jnp.ndarray
             Spatial coordinates array (``(N, D)``).
         target : jnp.ndarray
-            The field values at ``coords``.
+            The field values at ``coords``. Should have shape ``(N, F)`` with F the number of features.
+            If any normalization was used, ``target`` should be the original unnormalized field values for correct metric computation.
         jac_target : jnp.ndarray, optional
-            If given, the Jacobian of the field at ``coords``.
+            If given, the Jacobian of the field at ``coords``. Should have shape ``(N, D, F)`` with D the number of spatial dimensions and F the number of features.
 
         Returns
         -------
-        dict[str, float]
-            A dictionary of metric names to their computed values.
+        dict[str, float] or tuple[dict[str, float], dict[str, float]]
+            A dictionary or tuple of two dictionaries of metric names to their computed values.
         """
 
         metrics_target = {}
@@ -242,14 +257,12 @@ class NeuralFieldCompressor(BaseCompressor):
     def decompress(self, coords: jnp.ndarray) -> jnp.ndarray:
         """Run a forward pass through the current model.
 
-        If :attr:`norm_stats` contains ``"mean"`` and ``"std"`` the raw
-        output is denormalized via ``out * std + mean`` before being
-        returned.
+        If :attr:`norm_stats` is not None, the output is denormalized before being returned.
 
         Parameters
         ----------
         coords : jnp.ndarray
-            Query coordinates.
+            Query coordinates. Should have shape ``(N, D)`` with D the number of spatial dimensions.
         """
         out = self.model(coords)
         if self.norm_stats.get("method", None) is None:
@@ -277,11 +290,11 @@ class NeuralFieldCompressor(BaseCompressor):
         Parameters
         ----------
         coords : jnp.ndarray
-            Spatial coordinates for evaluation.
+            Spatial coordinates for evaluation. Should have shape ``(N, D)`` with D the number of spatial dimensions.
         target : jnp.ndarray
-            Ground-truth field values.
+            Ground truth field values. Should have shape ``(N, F)`` with F the number of features.
         jac_target : jnp.ndarray, optional
-            Ground-truth Jacobian values (included in the loss if given).
+            Ground truth Jacobian values (included in the loss if given). Should have shape ``(N, D, F)`` with D the number of spatial dimensions and F the number of features.
         batch_size : int
             Number of points per evaluation batch.
         tolerance : float
@@ -294,10 +307,11 @@ class NeuralFieldCompressor(BaseCompressor):
         nnx.State or False
             The downcasted parameter state if validation passes, ``False`` otherwise.
         """
-        # Create a temporary model with the same architecture but float16 parameters.
-        # This is a bit hacky but avoids modifying the original model's dtype.
 
         resolved_filter = resolve_filter(filter) if isinstance(filter, str) else filter
+
+        if batch_size is None:
+            batch_size = coords.shape[0]
 
         if filter == nnx.Param:
             downcasted_state = jax.tree_util.tree_map(lambda p: p.astype(jnp.float16), nnx.state(self.model, nnx.PathContains('hidden_layers')))
@@ -315,7 +329,6 @@ class NeuralFieldCompressor(BaseCompressor):
             target_batch = target[batch:batch + batch_size]
             jac_batch = jac_target[batch:batch + batch_size] if jac_target is not None else None
 
-            # Run a forward pass with the downcasted parameters.
             out = target_loss(self.model, coords_batch, target_batch)
             out_downcast = target_loss(model_downcast, coords_batch, target_batch)
             base_loss += out

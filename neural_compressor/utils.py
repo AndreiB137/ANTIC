@@ -14,7 +14,7 @@ FILTER_PRESETS: dict[str, Any] = {
 
 
 def resolve_filter(spec: FilterSpec) -> Any:
-    """Turn a user-facing *FilterSpec* into an nnx-compatible filter.
+    """Turn a *FilterSpec* into an nnx-compatible filter.
 
     Returns ``None`` when the full (unfiltered) state should be used.
     """
