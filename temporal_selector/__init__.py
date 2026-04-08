@@ -1,5 +1,4 @@
 from .base import TemporalSelector
-
 from .metrics import (
     get_metric,
     _pearson_corr,
