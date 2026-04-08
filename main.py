@@ -15,7 +15,12 @@ from pathlib import Path
 import os
 
 from configs import ExperimentConfig
-from experiments import run_kdv, run_kolmogorov, run_bssn
+from experiments import run_kdv, run_kolmogorov
+
+try:
+    from experiments import run_bssn
+except ImportError:
+    run_bssn = None
 
 def run(cfg: ExperimentConfig, run_checkpoint: bool = False):
     """Run the experiment corresponding to the solver type."""
@@ -91,10 +96,10 @@ def main():
         yaml.safe_dump(cfg.solver.model_dump(mode="json"), f, sort_keys=False)
 
 
-    print(f"[config] loaded {args.config}")
+    print(f"[config] Loaded {args.config}")
     run_checkpoint = False
     if os.path.exists(save_dir / "checkpoint"):
-        print(f"Checkpoint found in {save_dir / 'checkpoint'}, resuming training.")
+        print(f"[checkpoint] Checkpoint found in {save_dir / 'checkpoint'}, resuming training.")
         run_checkpoint = True
 
     run(cfg, run_checkpoint)
