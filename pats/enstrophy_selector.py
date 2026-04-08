@@ -22,13 +22,15 @@ class EnstrophySelector(PATS):
 
     Parameters
     ----------
-    queue_size : int
-        Look-ahead window size.
+    metric : str or Callable[[jnp.ndarray, jnp.ndarray], float]
+        Metric to quantify enstrophy change between snapshots.  Can be
+        "max_abs" (default) or a custom function that takes two arrays and returns a scalar.
+    window_size : int
+        Number of consecutive frames within bounds to trigger a selection even if the criteria is not broken, 
+        to ensure progress.
     corr_threshold : float
-        Pearson correlation below which a snapshot is forced to be
-        kept.
-    warmup : int
-        Initial frames always kept.
+        Minimum Pearson correlation between the current frame and the last selected frame to keep skipping.  
+        If the correlation drops below this threshold, the criteria is considered broken.
     """
 
     def __init__(
@@ -70,18 +72,27 @@ class EnstrophySelector(PATS):
         return jnp.mean(field**2)
 
     def _decide(self, field: jnp.ndarray) -> bool:
-        """Return ``True`` if *field* should be kept, ``False`` to skip.
+        """
 
-        Matches the offline ``offline_enstrophy_selector`` logic by
-        anchoring to the *previous* frame (last within bounds) when the
-        criterion breaks, rather than anchoring to the current frame.
+        A bit different from other selectors, the True or False decision is not 
+        to mean the *field* itself is compressed, but whether to select the *last_selected* frame.
+        The selection criteria follows an adaptive flux-based window, where the selector keeps skipping while both hold:
+        1. The enstrophy change from the last selected frame is within a factor of the initial change (first step after last selection), 
+        where the factor is adapted based on the observed enstrophy flux statistics in the current window (since last selection).
+        2. The Pearson correlation between the current frame and the last selected frame is above a threshold.
+            If the queue reaches the window_size, the current frame is selected regardless of the criteria to ensure progress.
+            If the criteria breaks, the last selected frame is returned and the current frame becomes the new anchor for the next window.
+            This way, we can adaptively skip frames during periods of low activity while ensuring we capture important transitions when the enstrophy changes significantly or the field decorrelates.
+        
+        Since the decision is about whether to select the last_selected frame, the method returns True when the criteria breaks (select last_selected) and False when still within bounds (keep skipping).
+        Because the first frame that breaks the criteria is the one that triggers selection, we cannot select the current frame,
+        but the *last_selected* frame which is the anchor of the next window.
 
-        In the offline version the queue scan keeps advancing ``best_idx``
-        while the criterion holds, so the selected frame is the *last*
-        within bounds.  The online version cannot look ahead, but by
-        moving the anchor one frame back on each break it starts the next
-        window from the correct point and achieves consecutive selection
-        (distance 1) in high-activity regions.
+        Parameters
+        ----------
+        field : jnp.ndarray
+            The current field snapshot to evaluate. Should be in real space (not Fourier).
+
         """
         curr_e = self.compute_activity(field)
 
@@ -156,7 +167,7 @@ class EnstrophySelector(PATS):
         self._prev_e = curr_e
         return True
 
-    def _save_state(self, path: str | Path) -> None:
+    def _save_state(self, base_dict: dict[str, Any], path: str | Path) -> None:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         state = {
@@ -169,6 +180,7 @@ class EnstrophySelector(PATS):
             "_prev_field": self._prev_field,
             "_prev_e": float(self._prev_e) if self._prev_e is not None else None,
         }
+        state.update(base_dict)
         with open(path / "state.pkl", "wb") as f:
             pickle.dump(state, f)
 
@@ -187,5 +199,4 @@ class EnstrophySelector(PATS):
         self._e_diff0 = state.get("_e_diff0")
         self._prev_field = state.get("_prev_field")
         self._prev_e = state.get("_prev_e")
-
     

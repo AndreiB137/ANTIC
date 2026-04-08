@@ -17,17 +17,12 @@ class KdVActivitySelector(PATS):
 
     Parameters
     ----------
-    domain_length : float
-        Periodic domain size.
-    nonlinearity : float
-        Coefficient α in front of the nonlinear term u·u_x.
-    threshold_quantile : float
-        Quantile of the running activity distribution above which a
-        snapshot is kept (0–1).
+    high_quantile : float
+        Upper quantile threshold for activity to trigger selection.
+    low_quantile : float
+        Lower quantile threshold for activity to trigger selection.
     window_size : int
         Rolling window for adaptive threshold.
-    warmup : int
-        Initial frames always kept.
     """
 
     def __init__(
@@ -78,7 +73,5 @@ class KdVActivitySelector(PATS):
             raise FileNotFoundError(f"Selector state directory {path} not found.")
         with open(path / "state.pkl", "rb") as f:
             state = pickle.load(f)
-        self.physical_time = state["physical_time"]
-        self.selected_snapshots = state["selected_snapshots"]
         self.history = deque(state["history"], maxlen=self.window_size)
         

@@ -14,14 +14,11 @@ import pickle
 try:
     from solver.bssn import BSSNSolver
 except ImportError:
+    BSSNSolver = None
     print("Warning: BSSNSolver not found. BSSN_MedianSelector will not work without JAX_NR.")
 
 class BSSN_MedianSelector(PATS):
-    """Selector using persistent-median surge detection.
-
-    Samples densely during *surges* (activity spikes) and skips
-    ahead during quiet baselines.  Originally designed for the BSSN
-    Weyl-scalar |Ψ₄| but works with any scalar activity signal.
+    """Selector using persistent median surge detection.
 
     Parameters
     ----------
@@ -36,8 +33,6 @@ class BSSN_MedianSelector(PATS):
         After ``patience_factor * window_size`` consecutive surge
         steps, the median baseline is updated to accept the new
         regime.
-    warmup : int
-        Initial frames always kept (to seed the median).
     """
 
     def __init__(
@@ -100,8 +95,9 @@ class BSSN_MedianSelector(PATS):
                 self.median_history.append(a)
                 return True
             if self.skip_remaining == 0:
-                # Reached end of skip window → keep this frame
+                # Reached end of skip window → keep this frame, start new skip
                 self.median_history.append(a)
+                self.skip_remaining = self.window_size
                 return True
             return False
 
@@ -121,16 +117,15 @@ class BSSN_MedianSelector(PATS):
             self.skip_remaining = self.window_size
             return True
 
-    def _save_state(self, path: str | Path) -> None:
+    def _save_state(self, base_dict: dict[str, Any], path: str | Path) -> None:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         state = {
-            "physical_time": self.physical_time,
-            "selected_snapshots": self.selected_snapshots,
             "median_history": self.median_history,
             "surge_count": self.surge_count,
             "skip_remaining": self.skip_remaining,
         }
+        state.update(base_dict)
         with open(path / "state.pkl", "wb") as f:
             pickle.dump(state, f)
 
@@ -138,8 +133,6 @@ class BSSN_MedianSelector(PATS):
         path = Path(path)
         with open(path / "state.pkl", "rb") as f:
             state = pickle.load(f)
-        self.physical_time = state["physical_time"]
-        self.selected_snapshots = state["selected_snapshots"]
         self.median_history = state["median_history"]
         self.surge_count = state["surge_count"]
         self.skip_remaining = state["skip_remaining"]

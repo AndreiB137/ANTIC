@@ -45,28 +45,16 @@ def compute_enstrophy(vorticity_field: jnp.ndarray) -> jnp.ndarray:
 class PATS(TemporalSelector):
     """Abstract base for physics-aware temporal selectors.
 
-    Subclasses provide a domain-specific *activity scalar* (e.g. an
-    enstrophy, a Weyl-scalar magnitude, a conserved-quantity
-    deviation) or physical quantity of interest, and a *decision policy*
-    that uses that quantity's history to decide whether a snapshot is
-    important.
+    Apart from the `TemporalSelector` interface, PATS requires
+    the implementation of a `compute_activity` method that produces a
+    physics specific activity scalar or quantity of interest from the current snapshot,
+    which is the main criterion for selection. For example, this could be the total
+    enstrophy for Navier-Stokes, the magnitude of the Weyl scalar Ψ₄ for BSSN.
 
-    Inherits from :class:`TemporalSelector` so it supports both
-    **in-situ** (via :meth:`step` / :meth:`run`) and **offline**
-    (via :meth:`select`) workflows with no solver dependency.
+    Subclasses can also override the `_save_state` and `_load_state` methods to store
+    any additional internal state variables that are needed to resume the selector's operation
+    after loading a solver checkpoint.
 
-    To create a custom physics-aware selector, subclass ``PATS`` and
-    implement :meth:`compute_activity` and :meth:`decide`.
-
-    Parameters
-    ----------
-    warmup : int
-        Number of initial snapshots to always keep (to bootstrap
-        statistics).
-    on_keep : callable, optional
-        ``on_keep(timestep, field)`` — fired on every kept snapshot.
-    on_skip : callable, optional
-        ``on_skip(timestep, field)`` — fired on every skipped snapshot.
     """
 
     def __init__(
@@ -75,17 +63,17 @@ class PATS(TemporalSelector):
         super().__init__()
 
     @abstractmethod
-    def compute_activity(self, *args, **kwargs) -> float:
-        """Compute a physics-specific activity scalar from *field*.
+    def compute_activity(self, *args, **kwargs):
+        """
+        Compute a scalar or other quantity of interest with a specific physical meaning, usually derived
+        from the spatial representation at a particular time step. This value is used to determine
+        the importance of the current snapshot.
 
-        The returned value summarises *how active* the current
-        snapshot is — e.g. total enstrophy, Weyl-scalar magnitude,
-        ``|u_t|`` norm, etc.
         """
         pass
 
     def save_state(self, path: str | Path) -> None:
-        """Save selector type, constructor args, and internal state to *path* directory."""
+        """Save internal state to *path* directory, while concatenating with any specific state from ``_save_state``."""
         common_state = {
             "physical_time": self.physical_time,
             "selected_snapshots": self.selected_snapshots,
@@ -97,7 +85,7 @@ class PATS(TemporalSelector):
         self._save_state(common_state, path)
 
     def load_state(self, path: str | Path) -> None:
-        """Load internal state from *path* directory."""
+        """Load the whole internal state from *path* directory and assign attributes to the selector instance."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Selector state directory {path} not found.")
@@ -111,26 +99,26 @@ class PATS(TemporalSelector):
 
         self._load_state(path)
     
-    @abstractmethod
     def _save_state(self, base_dict: dict[str, Any], path: str | Path, *args, **kwargs) -> None:
-        """Save selector type, constructor args, and internal state to *path* directory.
-
-        The directory will contain at minimum a ``metadata.json`` with
-        the selector class name and the constructor kwargs needed to
-        re-instantiate it.
         """
-        pass
+        Save any state specific to a subclass to *path* directory, while keeping the common state in *base_dict*.
+        Subclasses with extra internal state can override this method,
+        extend ``base_dict``, and write the combined payload to the same
+        ``state.pkl`` file.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        with open(path / "state.pkl", "wb") as f:
+            pickle.dump(base_dict, f)
 
-    @abstractmethod
     def _load_state(self, *args, **kwargs) -> None:
-        """Load internal state from *path* directory.
+        """Load any state specific to a subclass from *path* directory.
 
-        The directory will contain a ``metadata.json`` with the selector
-        class name and constructor kwargs, as well as any additional
-        files needed to restore the internal state (e.g. activity
-        history queues).
+        The common state is already restored by :meth:`load_state`.
+        Subclasses only need to override this if they persist additional
+        fields.
         """
-        pass
+        return None
 
 
 
