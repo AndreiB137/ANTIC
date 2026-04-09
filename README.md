@@ -134,7 +134,7 @@ The BSSN experiment handles 3D binary black hole mergers using the BSSN formulat
     alt="Neural field compressor versus classical compressors" width="600"/>
 </p>
 
-<p align="center">Table 1. Neural field compressor compared against a list of well established classical compressors. CR stands for compression ratio and second column is the compression time. All compressors have been tested on CPU, although most of them have GPU support. </p>
+<p align="center">Table 1. Neural field compressor compared against a list of well established classical compressors. CR stands for compression ratio and second column is the compression time. All classical compressors have been tested on CPU, although most of them have GPU support. </p>
 
 ---
 
