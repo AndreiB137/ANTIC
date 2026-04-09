@@ -103,12 +103,12 @@ The Kolmogorov experiment simulates 2D turbulence driven by a sinusoidal body fo
   <img src="misc/vorticity_field-08.png" alt="Vorticity Field t=0.8" width="400"/>
   <img src="misc/vorticity_field-12.png" alt="Vorticity Field t=1.2" width="400"/>
 </p>
-<p align="center"><em>Reconstructed vorticity fields at different simulation times, showing the neural compressor faithfully capturing turbulent structure evolution.</em></p>
+<p align="center">Fig 1. Reconstructed vorticity fields at different simulation times, showing the neural compressor faithfully capturing turbulent structure evolution.</p>
 
 <p align="center">
   <img src="misc/enstrophy_vs_time-1.png" alt="Enstrophy vs Time" width="600"/>
 </p>
-<p align="center"><em>Comparison in enstrophy between the original trajectory and the compressed variant. The neural model produces an excellent match, highlighting the temporal coherence in capturing the physics of the Kolmogorov flow.</em></p>
+<p align="center">Fig 2. Comparison in enstrophy between the original trajectory and the compressed variant. The neural model produces an excellent match, highlighting the temporal coherence in capturing the physics of the Kolmogorov flow.</p>
 
 ### BSSN Numerical Relativity
 
@@ -122,19 +122,19 @@ The BSSN experiment handles 3D binary black hole mergers using the BSSN formulat
   <img src="misc/lapse_comparison_ts3456-1.png" alt="Lapse Comparison ts=3456" width="400"/>
   <img src="misc/lapse_comparison_ts4968-1.png" alt="Lapse Comparison ts=4968" width="400"/>
 </p>
-<p align="center"><em>Lapse function comparison between the original trajectory and the neural reconstruction at different timesteps, demonstrating high-fidelity compression.</em></p>
+<p align="center">Fig 3. Lapse function comparison between the original trajectory and the neural reconstruction at different timesteps, demonstrating high-fidelity compression.</p>
 
 <p align="center">
   <img src="misc/weyl_magnitude_vs_time-1.png" alt="Weyl Magnitude vs Time" width="600"/>
 </p>
-<p align="center"><em> Comparing the Weyl scalar $|\Psi_4|$ magnitude between the original trajectory and the neural compressor. The temporal reconstructed quantity is in very good agreement with small differences, but more esentially capturing the correct trend in the Weyl scalar magnitude before and throughout the merger event.</em></p>
+<p align="center">Fig 4. Comparing the Weyl scalar magnitude between the original trajectory and the neural compressor. The temporal reconstructed quantity is in very good agreement with small differences, but more esentially capturing the correct trend in the Weyl scalar magnitude before and throughout the merger event.</p>
 
 <p align="center">
     <img src="misc/compression_table.png"
     alt="Neural field compressor versus classical compressors" width="600"/>
 </p>
 
-<p align="center"><em> Neural field compressor compared against a list of well established classical compressors. CR stands for compression ratio and second column is the compression time. All compressors have been tested on CPU, although most of them have GPU support. </em></p>
+<p align="center">Table 1. Neural field compressor compared against a list of well established classical compressors. CR stands for compression ratio and second column is the compression time. All compressors have been tested on CPU, although most of them have GPU support. </p>
 
 ---
 
