@@ -216,7 +216,7 @@ pip install pysz        # SZ3 compression
 
 ### 7. Some info regarding version compatibility
 
-The code was executed successfully with the latest `jax` (0.9.2), `flax` (0.12.6), `optax` (0.2.8), `orbax` (0.11.33). However, consider the soap optimizer as experimental or try to downgrade to an older `flax` version in order to use it.
+The code was executed successfully with the latest `jax` (0.9.2), `flax` (0.12.6), `optax` (0.2.8), `orbax` (0.11.33). It is possible some optimizers to not be compatible with FLAX NNX's internal ways of handling the parameter updates. In particular, the SOAP optimizer as of now will not work with the latest NNX version. 
 
 ---
 
@@ -411,10 +411,10 @@ If you use ANTIC in your research, please cite:
       title={ANTIC: Adaptive Neural Temporal In-situ Compressor}, 
       author={Sandeep Suresh Cranganore and Andrei Bodnar, Gianluca Galletti, Fabian Paischer, Johannes Brandstetter},
       year={2026},
-      eprint={},
+      eprint={2604.09543},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={}, 
+      url={https://arxiv.org/abs/2604.09543}, 
 }
 ```
 
