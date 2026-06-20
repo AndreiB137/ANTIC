@@ -2,6 +2,11 @@
   <img src="misc/antic1.png" alt="ANTIC Logo" width="700"/>
 </p>
 
+<p align="center">
+  <video src="misc/ns_compress.mp4" width="42%" controls></video>
+  <video src="misc/bssn_compress.mp4" width="42%" controls></video>
+</p>
+
 <h1 align="center">ANTIC — Adaptive Neural Temporal In-situ Compressor</h1>
 
 <p align="center">
