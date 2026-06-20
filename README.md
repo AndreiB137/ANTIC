@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <video src="misc/ns_compress.mp4" width="42%" controls></video>
-  <video src="misc/bssn_compress.mp4" width="42%" controls></video>
+  <img src="misc/ns_compress.gif" width="42%" />
+  <img src="misc/bssn_compress.gif" width="42%" />
 </p>
 
 <h1 align="center">ANTIC — Adaptive Neural Temporal In-situ Compressor</h1>
